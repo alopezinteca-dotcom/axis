@@ -1,3 +1,5 @@
+// Archivo de configuración del módulo APP
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -51,11 +53,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
-    // -------- Room -------- ✅ ESTO ES LO QUE FALTABA
+    // -------- Room --------
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
 
-    // -------- Coroutines (Room las usa) --------
+    // -------- Coroutines --------
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
