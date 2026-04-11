@@ -1,33 +1,61 @@
-buildscript {
-}
-
 plugins {
-    alias(libs.plugins.android.application) apply false
-    alias(libs.plugins.android.library) apply false
-    alias(libs.plugins.kotlin.android) apply false
-    alias(libs.plugins.diffplug.spotless) apply false
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("kotlin-kapt")
 }
 
-subprojects {
-    apply(plugin = "com.diffplug.spotless")
-    configure<com.diffplug.gradle.spotless.SpotlessExtension> {
-        kotlin {
-            target("**/*.kt")
-            targetExclude("${layout}.getBuildDirectory()/**/*.kt")
+android {
+    namespace = "vtsen.hashnode.dev.newemptycomposeapp"
+    compileSdk = 36
 
-            ktlint()
-            licenseHeaderFile(rootProject.file("spotless/copyright.kt"))
-        }
+    defaultConfig {
+        applicationId = "vtsen.hashnode.dev.newemptycomposeapp"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
+    }
 
-        kotlinGradle {
-            target("*.gradle.kts")
-            ktlint()
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 
-    afterEvaluate {
-        tasks.named("preBuild") {
-            dependsOn("spotlessApply")
-        }
+    buildFeatures {
+        compose = true
     }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.14"
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+
+    // -------- Compose --------
+    implementation(platform("androidx.compose:compose-bom:2024.10.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.activity:activity-compose:1.9.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
+
+    // -------- Room -------- ✅ ESTO ES LO QUE FALTABA
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+
+    // -------- Coroutines (Room las usa) --------
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 }
