@@ -3,6 +3,7 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -48,15 +50,14 @@ fun ActivityHomeScreen(
         viewModel.prepareExport()
     }
 
-    val folderPickerLauncher =
-        rememberLauncherForActivityResult(
-            ActivityResultContracts.OpenDocumentTree()
-        ) { uri ->
-            uri?.let {
-                ExportPreferences.saveFolderUri(context, it)
-                exportMonthlyCsv(context, it, closedTravels)
-            }
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            ExportPreferences.saveFolderUri(context, it)
+            exportMonthlyCsv(context, it, closedTravels)
         }
+    }
 
     Scaffold(
         floatingActionButton = {
@@ -72,14 +73,37 @@ fun ActivityHomeScreen(
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Resumen Activity",
+                    style = MaterialTheme.typography.headlineMedium
+                )
 
-            Text(
-                text = "Resumen Activity",
-                style = MaterialTheme.typography.headlineMedium
-            )
+                Button(
+                    onClick = {
+                        val folderUri = ExportPreferences.getFolderUri(context)
+                        if (folderUri == null) {
+                            folderPickerLauncher.launch(null)
+                        } else {
+                            exportMonthlyCsv(context, folderUri, closedTravels)
+                        }
+                    }
+                ) {
+                    Text("Exportar CSV")
+                }
+            }
 
             currentTravel?.let {
-                Card {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Viaje en curso", style = MaterialTheme.typography.titleMedium)
                         Text("${it.origin} → ${it.destination}")
@@ -93,20 +117,10 @@ fun ActivityHomeScreen(
                 style = MaterialTheme.typography.titleMedium
             )
 
-            Button(
-                onClick = {
-                    val folderUri = ExportPreferences.getFolderUri(context)
-                    if (folderUri == null) {
-                        folderPickerLauncher.launch(null)
-                    } else {
-                        exportMonthlyCsv(context, folderUri, closedTravels)
-                    }
-                }
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Exportar mes actual a Excel")
-            }
-
-            LazyColumn {
                 items(closedTravels) { travel ->
                     ClosedTravelItem(travel)
                 }
@@ -131,22 +145,23 @@ private fun ClosedTravelItem(travel: TravelEntity) {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Column {
-                Text("${travel.origin} → ${travel.destination}")
+                Text("${travel.origin} → ${travel.destination}", style = MaterialTheme.typography.bodyLarge)
                 Text(dateText, style = MaterialTheme.typography.bodySmall)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text("${travel.hoursImputed ?: 0.0} h")
-                Text("${travel.billingExpected} €")
+                Text("${travel.billingExpected} €", style = MaterialTheme.typography.bodySmall)
             }
         }
     }
 }
 
 /* =========================================================
-   EXPORTACIÓN CSV MENSUAL CON SOBRESCRITURA REAL
+   EXPORTACIÓN CSV MENSUAL CON SOBRESCRITURA REAL Y AVISO
    ========================================================= */
 
 private fun exportMonthlyCsv(
@@ -175,8 +190,7 @@ private fun exportMonthlyCsv(
             val displayName = cursor.getString(1)
 
             if (displayName == fileName) {
-                val fileUri =
-                    DocumentsContract.buildDocumentUriUsingTree(folderUri, documentId)
+                val fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, documentId)
                 DocumentsContract.deleteDocument(resolver, fileUri)
                 break
             }
@@ -190,9 +204,12 @@ private fun exportMonthlyCsv(
         fileName
     )
 
-    newFileUri?.let {
-        resolver.openOutputStream(it)?.let { stream ->
+    newFileUri?.let { uri ->
+        resolver.openOutputStream(uri)?.let { stream ->
             TravelCsvExporter.writeCsv(stream, travels)
         }
+        
+        // 🔹 El Toast para que la tablet te avise de que ha funcionado
+        Toast.makeText(context, "Exportado correctamente: $fileName", Toast.LENGTH_SHORT).show()
     }
 }
