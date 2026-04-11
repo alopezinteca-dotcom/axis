@@ -1,7 +1,3 @@
-codemagic.yaml
-(Recuerda: Este archivo debe ir exactamente en la carpeta raíz de tu proyecto, al mismo nivel que la carpeta app y el archivo build.gradle.kts principal).
-
-YAML
 workflows:
   android-debug:
     name: AXIS Android Debug APK
