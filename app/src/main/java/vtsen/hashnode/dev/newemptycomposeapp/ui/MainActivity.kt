@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.viewmodel.compose.viewModel
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.ActivityHomeScreen
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.ActivityViewModel
@@ -20,7 +21,11 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.TravelDetailScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // ✅ SplashScreen (AndroidX)
+        installSplashScreen()
+
         super.onCreate(savedInstanceState)
+
         setContent {
             MaterialTheme {
                 AxisApp()
@@ -38,6 +43,7 @@ private sealed class Screen {
 @Composable
 private fun AxisApp() {
     val context = LocalContext.current
+
     val viewModel: ActivityViewModel = viewModel(
         factory = ActivityViewModelFactory(context)
     )
@@ -49,19 +55,25 @@ private fun AxisApp() {
     }
 
     when (currentScreen) {
-        Screen.Home -> ActivityHomeScreen(
-            viewModel = viewModel,
-            onNewTravelClick = { currentScreen = Screen.NewTravel }
-        )
+        Screen.Home -> {
+            ActivityHomeScreen(
+                viewModel = viewModel,
+                onNewTravelClick = { currentScreen = Screen.NewTravel }
+            )
+        }
 
-        Screen.NewTravel -> NewTravelScreen(
-            viewModel = viewModel,
-            onStartTravel = { currentScreen = Screen.TravelDetail }
-        )
+        Screen.NewTravel -> {
+            NewTravelScreen(
+                viewModel = viewModel,
+                onStartTravel = { currentScreen = Screen.TravelDetail }
+            )
+        }
 
-        Screen.TravelDetail -> TravelDetailScreen(
-            viewModel = viewModel,
-            onCloseTravel = { currentScreen = Screen.Home }
-        )
+        Screen.TravelDetail -> {
+            TravelDetailScreen(
+                viewModel = viewModel,
+                onCloseTravel = { currentScreen = Screen.Home }
+            )
+        }
     }
 }
