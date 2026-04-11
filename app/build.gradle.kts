@@ -50,7 +50,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
-    // ✅ SplashScreen (esto evita los errores de Theme.SplashScreen / attrs)
+    // ✅ Material Components (necesario para Theme.Material3.* en XML)
+    implementation("com.google.android.material:material:1.13.0")
+
+    // ✅ SplashScreen compat
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // -------- Room --------
