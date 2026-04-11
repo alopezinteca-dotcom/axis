@@ -1,19 +1,12 @@
 <resources>
 
-    <!-- Tema principal de la app -->
-    <style name="Theme.Axis" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Puedes personalizar colores más adelante -->
-    </style>
+    <!-- Tema principal (usa Material 3 en XML) -->
+    <style name="Theme.Axis" parent="Theme.Material3.DayNight.NoActionBar" />
 
     <!-- Tema de SplashScreen -->
     <style name="Theme.Axis.Splash" parent="Theme.SplashScreen">
-        <!-- Fondo del splash -->
         <item name="windowSplashScreenBackground">@android:color/black</item>
-
-        <!-- Icono del splash (puedes cambiarlo por el tuyo) -->
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-
-        <!-- Tema que se aplica después del splash -->
         <item name="postSplashScreenTheme">@style/Theme.Axis</item>
     </style>
 
