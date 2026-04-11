@@ -65,7 +65,6 @@ private fun AxisApp() {
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Menu) }
 
-    // Back: comportamiento esperado en tablet
     BackHandler(enabled = currentScreen != Screen.Menu) {
         currentScreen = when (currentScreen) {
             Screen.TravelDetail -> Screen.ActivityHome
@@ -101,10 +100,6 @@ private fun AxisApp() {
     }
 }
 
-/* =========================================================
-   PANTALLA 0 · MENÚ (Tablet-first 40/60)
-   ========================================================= */
-
 @Composable
 private fun AxisMenuScreen(
     onActivityClick: () -> Unit,
@@ -120,7 +115,7 @@ private fun AxisMenuScreen(
                 .padding(48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // IZQUIERDA (40%) Branding
+            // Izquierda (40%) Branding
             Column(
                 modifier = Modifier
                     .weight(0.4f)
@@ -140,7 +135,7 @@ private fun AxisMenuScreen(
                 )
             }
 
-            // DERECHA (60%) Navegación
+            // Derecha (60%) Navegación
             Column(
                 modifier = Modifier
                     .weight(0.6f)
@@ -151,12 +146,10 @@ private fun AxisMenuScreen(
             ) {
                 AxisMenuCard(
                     title = "Activity",
-                    subtitle = "Viajes, horas, rentabilidad",
+                    subtitle = "Viajes, horas, exportación",
                     onClick = onActivityClick
                 )
-
                 Spacer(modifier = Modifier.height(24.dp))
-
                 AxisMenuCard(
                     title = "Location",
                     subtitle = "GPS / ubicaciones (Módulo 2)",
@@ -193,10 +186,6 @@ private fun AxisMenuCard(
     }
 }
 
-/* =========================================================
-   Placeholder Módulo 2
-   ========================================================= */
-
 @Composable
 private fun LocationPlaceholderScreen() {
     Surface(
@@ -209,13 +198,10 @@ private fun LocationPlaceholderScreen() {
                 .padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Text("Location (Módulo 2)", style = MaterialTheme.typography.displaySmall)
             Text(
-                text = "Location (Módulo 2)",
-                style = MaterialTheme.typography.displaySmall
-            )
-            Text(
-                text = "Aquí irá el simulador GPS / referencias.\n" +
-                    "Por ahora es un placeholder para no rehacer nada después.",
+                "Placeholder: aquí irá el módulo GPS/ubicaciones.\n" +
+                    "No se ha implementado todavía, pero ya está integrado en el menú.",
                 style = MaterialTheme.typography.bodyLarge
             )
         }
