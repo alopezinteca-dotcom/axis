@@ -1,7 +1,12 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -14,7 +19,8 @@ fun TravelDetailScreen(
 ) {
     val travel by viewModel.currentTravel.collectAsStateWithLifecycle()
 
-    var hours by remember { mutableStateOf("") }
+    var kmEnd by remember { mutableStateOf("") }
+    var hoursImputed by remember { mutableStateOf("") }
 
     Column(
         modifier = Modifier
@@ -22,25 +28,35 @@ fun TravelDetailScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Detalle del viaje")
-
         travel?.let {
             Text("${it.origin} → ${it.destination}")
+            Text("Km inicio: ${it.kmStart}")
         }
 
         OutlinedTextField(
-            value = hours,
-            onValueChange = { hours = it },
+            value = kmEnd,
+            onValueChange = { kmEnd = it },
+            label = { Text("Kilómetros fin") }
+        )
+
+        OutlinedTextField(
+            value = hoursImputed,
+            onValueChange = { hoursImputed = it },
             label = { Text("Horas imputadas") }
         )
 
-        Button(onClick = {
-            viewModel.closeCurrentTravel(
-                kmEnd = 0,
-                hoursImputed = hours.toDoubleOrNull() ?: 0.0
-            )
-            onCloseTravel()
-        }) {
+        Button(
+            onClick = {
+                val success = viewModel.closeCurrentTravel(
+                    kmEnd = kmEnd.toIntOrNull() ?: -1,
+                    hoursImputed = hoursImputed.toDoubleOrNull() ?: -1.0
+                )
+
+                if (success) {
+                    onCloseTravel()
+                }
+            }
+        ) {
             Text("Cerrar viaje")
         }
     }
