@@ -9,11 +9,11 @@ workflows:
     scripts:
       - name: Build debug APK
         script: |
-          # 1. Damos permiso de ejecución a Gradle (Evita error "Permission denied")
+          # 1. Damos permiso de ejecución a Gradle
           chmod +x gradlew
           
-          # 2. Compilamos el APK ignorando las reglas estrictas de formato (-x)
-          ./gradlew assembleDebug -x spotlessKotlinApply -x spotlessKotlin -x spotlessCheck
+          # 2. Compilamos el APK normalmente (ya no hay Spotless que nos moleste)
+          ./gradlew assembleDebug
 
     artifacts:
       - app/build/outputs/**/*.apk
