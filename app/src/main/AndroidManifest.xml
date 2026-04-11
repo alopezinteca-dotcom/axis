@@ -6,7 +6,6 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Axis">
 
-        <!-- OJO: aquí pongo el nombre COMPLETO para que no haya dudas -->
         <activity
             android:name="vtsen.hashnode.dev.newemptycomposeapp.ui.MainActivity"
             android:exported="true"
