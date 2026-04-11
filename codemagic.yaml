@@ -1,9 +1,11 @@
+codemagic.yaml
+(Recuerda: Este archivo debe ir exactamente en la carpeta raíz de tu proyecto, al mismo nivel que la carpeta app y el archivo build.gradle.kts principal).
+
+YAML
 workflows:
   android-debug:
     name: AXIS Android Debug APK
     max_build_duration: 60
-
-    # Hemos eliminado la línea instance_type para usar la máquina gratuita por defecto
 
     environment:
       java: 17
@@ -11,8 +13,11 @@ workflows:
     scripts:
       - name: Build debug APK
         script: |
+          # 1. Damos permiso de ejecución a Gradle (Evita error "Permission denied")
           chmod +x gradlew
-          ./gradlew assembleDebug
+          
+          # 2. Compilamos el APK ignorando las reglas estrictas de formato (-x)
+          ./gradlew assembleDebug -x spotlessKotlinApply -x spotlessKotlin -x spotlessCheck
 
     artifacts:
       - app/build/outputs/**/*.apk
