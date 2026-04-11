@@ -34,9 +34,25 @@ android {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
 
+    // ✅ CLAVE: Java compile target = 17 (esto arregla el 1.8 vs 17)
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    // ✅ Kotlin target = 17
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+// ✅ Toolchain Kotlin (opcional, pero muy recomendable en CI)
+kotlin {
+    jvmToolchain(17)
+}
+
+kapt {
+    correctErrorTypes = true
 }
 
 dependencies {
@@ -50,10 +66,10 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
-    // ✅ Material Components (necesario para Theme.Material3.* en XML)
+    // Material Components (para temas XML Theme.Material3.*)
     implementation("com.google.android.material:material:1.13.0")
 
-    // ✅ SplashScreen compat
+    // SplashScreen compat
     implementation("androidx.core:core-splashscreen:1.0.1")
 
     // -------- Room --------
