@@ -3,37 +3,26 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
-/* =========================================================
-   ENTITY · VIAJE (MODELO DEFINITIVO)
-   ========================================================= */
-
-@Entity(tableName = "travels")
+@Entity(tableName = "travel")
 data class TravelEntity(
-
-    /* ---------- IDENTIDAD ---------- */
     @PrimaryKey(autoGenerate = true)
-    val id: Long = 0L,
+    val id: Long = 0,
 
-    /* ---------- CONTEXTO ---------- */
     val origin: String,
     val destination: String,
     val description: String,
-
-    /* ---------- KILOMETRAJE ---------- */
     val kmStart: Int,
-    val kmEnd: Int?,                 // null mientras esté EN CURSO
+    val kmEnd: Int?,
 
-    /* ---------- ECONOMÍA ---------- */
+    /**
+     * Facturación prevista del viaje
+     */
     val billingExpected: Double,
+
     val hasDiet: Boolean,
+    val hoursImputed: Double?,
 
-    /* ---------- DECISIÓN HUMANA (PANTALLA 2) ---------- */
-    val hoursImputed: Double?,        // null hasta cerrar el viaje
-
-    /* ---------- ESTADO ---------- */
     val status: TravelStatus,
-
-    /* ---------- TIEMPOS ---------- */
     val startTimestamp: Long,
-    val endTimestamp: Long?           // null mientras esté EN CURSO
+    val endTimestamp: Long?
 )
