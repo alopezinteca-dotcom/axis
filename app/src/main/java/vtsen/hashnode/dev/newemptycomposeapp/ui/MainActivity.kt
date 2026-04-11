@@ -5,7 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.ActivityHomeScreen
@@ -38,26 +42,26 @@ private fun AxisApp() {
         factory = ActivityViewModelFactory(context)
     )
 
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Home) }
 
-    BackHandler(screen != Screen.Home) {
-        screen = Screen.Home
+    BackHandler(currentScreen != Screen.Home) {
+        currentScreen = Screen.Home
     }
 
-    when (screen) {
+    when (currentScreen) {
         Screen.Home -> ActivityHomeScreen(
             viewModel = viewModel,
-            onNewTravelClick = { screen = Screen.NewTravel }
+            onNewTravelClick = { currentScreen = Screen.NewTravel }
         )
 
         Screen.NewTravel -> NewTravelScreen(
             viewModel = viewModel,
-            onStartTravel = { screen = Screen.TravelDetail }
+            onStartTravel = { currentScreen = Screen.TravelDetail }
         )
 
         Screen.TravelDetail -> TravelDetailScreen(
             viewModel = viewModel,
-            onCloseTravel = { screen = Screen.Home }
+            onCloseTravel = { currentScreen = Screen.Home }
         )
     }
 }
