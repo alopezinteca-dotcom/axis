@@ -5,40 +5,25 @@ import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
 
-/* =========================================================
-   DAO · VIAJES
-   ========================================================= */
-
 @Dao
 interface TravelDao {
-
-    /* -----------------------------------------------------
-       INSERTAR VIAJE (AL INICIAR)
-       ----------------------------------------------------- */
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTravel(travel: TravelEntity)
 
-    /* -----------------------------------------------------
-       OBTENER VIAJE EN CURSO
-       (SOLO PUEDE HABER UNO)
-       ----------------------------------------------------- */
-
-    @Query("""
+    @Query(
+        """
         SELECT * FROM travels
         WHERE status = :status
         LIMIT 1
-    """)
+        """
+    )
     suspend fun getTravelInProgress(
         status: TravelStatus = TravelStatus.IN_PROGRESS
     ): TravelEntity?
 
-    /* -----------------------------------------------------
-       CERRAR VIAJE
-       (GUARDA HORAS Y ESTADO)
-       ----------------------------------------------------- */
-
-    @Query("""
+    @Query(
+        """
         UPDATE travels
         SET
             kmEnd = :kmEnd,
@@ -46,7 +31,8 @@ interface TravelDao {
             status = :newStatus,
             endTimestamp = :endTimestamp
         WHERE id = :travelId
-    """)
+        """
+    )
     suspend fun closeTravel(
         travelId: Long,
         kmEnd: Int,
@@ -55,16 +41,13 @@ interface TravelDao {
         endTimestamp: Long
     )
 
-    /* -----------------------------------------------------
-       LISTAR VIAJES CERRADOS
-       (EXCEL / HISTÓRICO)
-       ----------------------------------------------------- */
-
-    @Query("""
+    @Query(
+        """
         SELECT * FROM travels
         WHERE status = :status
         ORDER BY startTimestamp ASC
-    """)
+        """
+    )
     suspend fun getClosedTravels(
         status: TravelStatus = TravelStatus.CLOSED
     ): List<TravelEntity>
