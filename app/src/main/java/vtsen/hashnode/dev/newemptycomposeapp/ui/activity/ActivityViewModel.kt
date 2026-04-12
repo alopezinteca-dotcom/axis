@@ -1,11 +1,12 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import.viewModelScopeimport androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlin.math.abs
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
@@ -14,13 +15,29 @@ class ActivityViewModel(
     private val repository: TravelRepository
 ) : ViewModel() {
 
-    val currentTravel: StateFlow<TravelEntity?> =
-        repository.currentTravel
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // ✅ Todos los viajes (KPIs del mes + export)
+    val allTravels: StateFlow<List<TravelEntity>> =
+        repository.allTravels.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
+    // ✅ Viaje en curso (si existe)
+    val currentTravel: StateFlow<TravelEntity?> =
+        repository.currentTravel.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
+
+    // ✅ Viajes cerrados (export y listas)
     val exportData: StateFlow<List<TravelEntity>> =
-        repository.closedTravels
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        repository.closedTravels.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
     fun startTravel(
         origin: String,
@@ -50,6 +67,7 @@ class ActivityViewModel(
         return true
     }
 
+    // ✅ Guardar horas provisionales (draft) mientras está EN CURSO
     fun updateHoursDraft(hoursDraft: Double?): Boolean {
         val current = currentTravel.value ?: return false
         if (hoursDraft != null && hoursDraft < 0.0) return false
@@ -60,6 +78,7 @@ class ActivityViewModel(
         return true
     }
 
+    // ✅ Cerrar viaje: guarda snapshot + imputadas + flags (sin recálculo en Excel)
     fun closeCurrentTravel(
         kmEnd: Int,
         hoursImputed: Double,
@@ -91,5 +110,10 @@ class ActivityViewModel(
             )
         }
         return true
+    }
+
+    // Compatibilidad con llamadas antiguas (ya no hace falta porque exportData es Flow->StateFlow)
+    fun prepareExport() {
+        // Intencionadamente vacío
     }
 }
