@@ -25,7 +25,13 @@ class TravelRepository(
         hoursImputed: Double,
         hoursModified: Boolean,
         deltaHours: Double,
-        impactEuroAlejandro: Double
+        impactEuroAlejandro: Double,
+        snapCosteKmOperativo: Double,
+        snapCosteDietaFija: Double,
+        snapPorcBenefExigidoA: Double,
+        snapCosteHoraAlejandro: Double,
+        snapCosteHoraEmpresaX: Double,
+        snapTarifaObjetivoY: Double
     ) {
         travelDao.closeTravel(
             id = id,
@@ -35,7 +41,13 @@ class TravelRepository(
             hoursImputed = hoursImputed,
             hoursModified = hoursModified,
             deltaHours = deltaHours,
-            impactEuroAlejandro = impactEuroAlejandro
+            impactEuroAlejandro = impactEuroAlejandro,
+            snapCosteKmOperativo = snapCosteKmOperativo,
+            snapCosteDietaFija = snapCosteDietaFija,
+            snapPorcBenefExigidoA = snapPorcBenefExigidoA,
+            snapCosteHoraAlejandro = snapCosteHoraAlejandro,
+            snapCosteHoraEmpresaX = snapCosteHoraEmpresaX,
+            snapTarifaObjetivoY = snapTarifaObjetivoY
         )
     }
 }
