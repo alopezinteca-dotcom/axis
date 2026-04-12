@@ -34,13 +34,13 @@ android {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
 
-    // ✅ CLAVE: Java compile target = 17
+    // ✅ Java target 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    // ✅ Kotlin target = 17
+    // ✅ Kotlin target 17
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -56,6 +56,7 @@ kapt {
 }
 
 dependencies {
+
     // -------- Compose --------
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.ui:ui")
@@ -65,9 +66,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
-    implementation("androidx.datastore:datastore-preferences:1.2.1")
 
-    // Material Components
+    // Material Components (para temas XML Theme.Material3.*)
     implementation("com.google.android.material:material:1.13.0")
 
     // SplashScreen compat
@@ -81,7 +81,10 @@ dependencies {
     // -------- Coroutines --------
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // 🟢 NUEVO: Localización y Corrutinas para Play Services (GPS)
+    // -------- GPS (Play Services) --------
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
+
+    // 🟢 NUEVO (PASO 5.2): DataStore Preferences (Ajustes)
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
 }
