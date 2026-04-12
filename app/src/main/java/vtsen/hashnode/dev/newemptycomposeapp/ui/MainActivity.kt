@@ -18,6 +18,9 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.ActivityViewModelFactor
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.NewTravelScreen
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.TravelDetailScreen
 import vtsen.hashnode.dev.newemptycomposeapp.ui.theme.AxisTheme
+import vtsen.hashnode.dev.newemptycomposeapp.ui.settings.SettingsScreen
+import vtsen.hashnode.dev.newemptycomposeapp.ui.settings.SettingsViewModel
+import vtsen.hashnode.dev.newemptycomposeapp.ui.settings.SettingsViewModelFactory
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
