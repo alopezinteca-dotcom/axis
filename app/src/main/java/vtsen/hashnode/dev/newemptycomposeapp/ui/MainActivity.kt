@@ -1,7 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui
 
-import android.os.Bundle
-import androidx.activity.ComponentActivity
+import.ComponentActivityimport android.os.Bundle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
@@ -53,10 +52,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/**
- * Navegación simple tipo “máquina de estados” (sin Navigation Compose)
- * Tablet-first y CI-safe.
- */
 private sealed class Screen {
     object Menu : Screen()
     object ActivityHome : Screen()
@@ -70,20 +65,18 @@ private sealed class Screen {
 private fun AxisApp() {
     val context = LocalContext.current
 
-    // ✅ ViewModel del Módulo Activity (Room)
+    // ✅ ViewModel Módulo Activity (Room)
     val activityViewModel: ActivityViewModel = viewModel(
         factory = ActivityViewModelFactory(context)
     )
 
-    // ✅ (ESTO ES LO QUE PREGUNTABAS)
-    // ViewModel de Ajustes (DataStore)
+    // ✅ ViewModel Ajustes (DataStore)
     val settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModelFactory(context)
     )
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Menu) }
 
-    // Back gesture coherente en tablet
     BackHandler(enabled = currentScreen != Screen.Menu) {
         currentScreen = when (currentScreen) {
             Screen.TravelDetail -> Screen.ActivityHome
@@ -113,8 +106,11 @@ private fun AxisApp() {
             onStartTravel = { currentScreen = Screen.TravelDetail }
         )
 
+        // ✅ AQUÍ ESTÁ LA CORRECCIÓN DEL PASO 6:
+        // TravelDetailScreen ahora recibe settingsViewModel
         Screen.TravelDetail -> TravelDetailScreen(
             viewModel = activityViewModel,
+            settingsViewModel = settingsViewModel,
             onCloseTravel = { currentScreen = Screen.ActivityHome }
         )
 
@@ -122,8 +118,6 @@ private fun AxisApp() {
             onBack = { currentScreen = Screen.Menu }
         )
 
-        // ✅ (ESTO ES LO OTRO QUE PREGUNTABAS)
-        // Caso Settings: ya llama a SettingsScreen real
         Screen.Settings -> SettingsScreen(
             viewModel = settingsViewModel,
             onBack = { currentScreen = Screen.Menu }
@@ -132,7 +126,7 @@ private fun AxisApp() {
 }
 
 /* =========================================================
-   PANTALLA 0 · MENÚ (40/60) — Activity / Location / Settings
+   MENÚ Premium (40/60): Activity / Location / Settings
    ========================================================= */
 
 @Composable
@@ -259,7 +253,9 @@ private fun LocationComingSoonScreen(onBack: () -> Unit) {
                     "Este módulo se implementará después.",
                 style = MaterialTheme.typography.bodyLarge
             )
+
             Spacer(modifier = Modifier.height(8.dp))
+
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
