@@ -36,24 +36,22 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.round
+import vtsen.hashnode.dev.newemptycomposeapp.ui.settings.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TravelDetailScreen(
     viewModel: ActivityViewModel,
+    settingsViewModel: SettingsViewModel,
     onCloseTravel: () -> Unit
 ) {
     val travel by viewModel.currentTravel.collectAsStateWithLifecycle()
+    val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
 
     var kmEnd by rememberSaveable { mutableStateOf("") }
     var hoursDraftText by rememberSaveable { mutableStateOf("") }
-
-    // Paso 3: snapshot automático (solo lectura)
-    var hoursCalculatedText by rememberSaveable { mutableStateOf("") }
-
-    // Dato maestro
+    var hoursCalculatedText by rememberSaveable { mutableStateOf("") } // snapshot (readonly)
     var hoursImputedText by rememberSaveable { mutableStateOf("") }
-
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
     val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -63,55 +61,35 @@ fun TravelDetailScreen(
         return
     }
 
-    // =========================================================
-    // PASO 3 — MODELO A (Alejandro) — los 4 que “cuentan”
-    // Dieta por viaje => travel!!.hasDiet
-    // % como MARKUP (alineado con tu Excel)
-    // =========================================================
-    val COSTE_KM_OPERATIVO = 0.19
-    val COSTE_DIETA_FIJA = 12.0
-    val PORC_BENEF_EXIGIDO_A = 0.35
-    val COSTE_HORA_ALEJANDRO = 26.0
-
-    // =========================================================
-    // PASO 4 — MODELO EMPRESA (X/Y) — parámetros de tu tabla
-    // =========================================================
-    val SALARIO_BRUTO_ANUAL = 33000.0
-    val CARGAS_EMPRESA = 0.3065
-    val OVERHEAD_ANUAL = 12000.0
-    val HORAS_ANUALES = 1880.0
-    val UTILIZACION = 0.80
-    val MARGEN_OBJETIVO_EMPRESA = 0.15
-
-    // X (rentable mínimo) y Y (con margen)
-    val costeHoraEmpresaX = remember {
-        val costeEmpresaAnual = (SALARIO_BRUTO_ANUAL * (1.0 + CARGAS_EMPRESA)) + OVERHEAD_ANUAL
-        val horasFacturables = HORAS_ANUALES * UTILIZACION
-        costeEmpresaAnual / horasFacturables
-    }
-    val tarifaObjetivoY = remember { costeHoraEmpresaX * (1.0 + MARGEN_OBJETIVO_EMPRESA) }
-
     val startTimeStr = formatter.format(Date(travel!!.startTimestamp))
 
-    // Inicialización
+    // --- Modelo A desde settings ---
+    val COSTE_KM_OPERATIVO = settings.costeKmOperativo
+    val COSTE_DIETA_FIJA = settings.costeDietaFija
+    val PORC_BENEF_EXIGIDO_A = settings.porcBenefExigidoA
+    val COSTE_HORA_ALEJANDRO = settings.costeHoraAlejandro
+
+    // --- Modelo Empresa X/Y desde settings ---
+    val costeEmpresaAnual = (settings.salarioBrutoAnual * (1.0 + settings.cargasEmpresa)) + settings.overheadAnual
+    val horasFacturables = settings.horasAnuales * settings.utilizacion
+    val costeHoraEmpresaX = costeEmpresaAnual / horasFacturables
+    val tarifaObjetivoY = costeHoraEmpresaX * (1.0 + settings.margenEmpresa)
+
     LaunchedEffect(travel!!.id) {
         hoursDraftText = travel!!.hoursDraft?.toString() ?: ""
-        hoursImputedText = travel!!.hoursImputed?.toString()
-            ?: (travel!!.hoursDraft?.toString() ?: "")
+        hoursImputedText = travel!!.hoursImputed?.toString() ?: (travel!!.hoursDraft?.toString() ?: "")
         hoursCalculatedText = travel!!.hoursCalculatedSnapshot?.toString() ?: ""
     }
 
-    // =========================================================
-    // PASO 3 — CÁLCULO AUTOMÁTICO HORAS SUGERIDAS (snapshot)
-    // Coste max permitido = Facturación / (1 + 0,35)
-    // =========================================================
+    // --- Auto-cálculo horas sugeridas (Modelo A) ---
     val kmEndInt = kmEnd.toIntOrNull()
     val kmDone = if (kmEndInt != null) max(0, kmEndInt - travel!!.kmStart) else null
 
-    val suggestedHours: Double? = remember(kmDone, travel!!.billingExpected, travel!!.hasDiet) {
+    val suggestedHours: Double? = remember(kmDone, travel!!.billingExpected, travel!!.hasDiet, settings) {
         if (kmDone == null) return@remember null
 
         val facturacion = travel!!.billingExpected
+        // % como MARKUP
         val costeMaxPermitidoA = facturacion / (1.0 + PORC_BENEF_EXIGIDO_A)
 
         val costeKm = kmDone * COSTE_KM_OPERATIVO
@@ -130,31 +108,15 @@ fun TravelDetailScreen(
         }
     }
 
-    // Semáforo modelo A (imputadas vs sugeridas)
     val imputedValue = hoursImputedText.replace(',', '.').toDoubleOrNull()
     val calculatedValue = hoursCalculatedText.replace(',', '.').toDoubleOrNull()
 
-    val semaforoA: Boolean? = remember(imputedValue, calculatedValue) {
-        if (imputedValue == null || calculatedValue == null) null
-        else imputedValue <= calculatedValue + 1e-9
-    }
-
-    // =========================================================
-    // PASO 4 — TARIFA EFECTIVA y SEMÁFORO EMPRESA (X/Y)
-    // tarifa_efectiva = facturación / horas_imputadas
-    // =========================================================
     val tarifaEfectiva = remember(imputedValue, travel!!.billingExpected) {
-        if (imputedValue == null || imputedValue <= 0.0) null
-        else travel!!.billingExpected / imputedValue
+        if (imputedValue == null || imputedValue <= 0.0) null else travel!!.billingExpected / imputedValue
     }
 
-    val semaforoEmpresaX: Boolean? = remember(tarifaEfectiva) {
-        if (tarifaEfectiva == null) null else tarifaEfectiva >= costeHoraEmpresaX
-    }
-
-    val semaforoEmpresaY: Boolean? = remember(tarifaEfectiva) {
-        if (tarifaEfectiva == null) null else tarifaEfectiva >= tarifaObjetivoY
-    }
+    val semaforoEmpresaX = tarifaEfectiva?.let { it >= costeHoraEmpresaX }
+    val semaforoEmpresaY = tarifaEfectiva?.let { it >= tarifaObjetivoY }
 
     Scaffold(
         topBar = {
@@ -174,98 +136,58 @@ fun TravelDetailScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
 
-                // IZQUIERDA 40% — Contexto
-                Card(
-                    modifier = Modifier.weight(0.4f),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
+                Card(modifier = Modifier.weight(0.4f), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Contexto Actual", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Divider()
-                        Text("📍 Origen: ${travel!!.origin}", style = MaterialTheme.typography.bodyLarge)
-                        Text("🏁 Destino: ${travel!!.destination}", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "📝 Ref: ${travel!!.description}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("📍 Origen: ${travel!!.origin}")
+                        Text("🏁 Destino: ${travel!!.destination}")
+                        Text("📝 Ref: ${travel!!.description}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Divider()
-                        Text("⏱️ Hora Salida: $startTimeStr", style = MaterialTheme.typography.bodyLarge)
-                        Text("🚗 KM Iniciales: ${travel!!.kmStart}", style = MaterialTheme.typography.bodyLarge)
-                        Text(
-                            "💶 Facturación: ${String.format(Locale.getDefault(), "%.2f", travel!!.billingExpected)} €",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            "🍽️ Dieta: ${if (travel!!.hasDiet) "SI (12,00 €)" else "NO"}",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                        Text("⏱️ Hora Salida: $startTimeStr")
+                        Text("🚗 KM Iniciales: ${travel!!.kmStart}")
+                        Text("💶 Facturación: ${String.format(Locale.getDefault(), "%.2f", travel!!.billingExpected)} €")
+                        Text("🍽️ Dieta: ${if (travel!!.hasDiet) "SI" else "NO"}")
                     }
                 }
 
-                // DERECHA 60% — Draft + Modelos + Cierre
-                Card(
-                    modifier = Modifier.weight(0.6f),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
+                Card(modifier = Modifier.weight(0.6f), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Imputación y Cierre", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-                        // Draft
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OutlinedTextField(
                                 value = hoursDraftText,
                                 onValueChange = { hoursDraftText = it },
                                 label = { Text("Horas Provisionales (Draft)") },
                                 modifier = Modifier.weight(1f),
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                supportingText = { Text("Punto intermedio (en ruta).") }
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                             )
-                            Button(
-                                onClick = {
-                                    val draft = hoursDraftText.replace(',', '.').toDoubleOrNull()
-                                    val ok = viewModel.updateHoursDraft(draft)
-                                    errorMessage = if (ok) null else "Horas provisionales inválidas."
-                                }
-                            ) { Text("Guardar Draft") }
+                            Button(onClick = {
+                                val draft = hoursDraftText.replace(',', '.').toDoubleOrNull()
+                                val ok = viewModel.updateHoursDraft(draft)
+                                errorMessage = if (ok) null else "Horas provisionales inválidas."
+                            }) { Text("Guardar Draft") }
                         }
 
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
-
-                        Text("Datos Finales", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.SemiBold)
 
                         OutlinedTextField(
                             value = kmEnd,
                             onValueChange = { kmEnd = it },
                             label = { Text("Kilómetros de Llegada") },
                             modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            supportingText = { Text("Al escribir KM fin, se calculan los modelos automáticamente.") }
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
 
-                        // Snapshot (solo lectura)
                         OutlinedTextField(
                             value = hoursCalculatedText,
                             onValueChange = { },
                             readOnly = true,
                             label = { Text("Horas sugeridas (Modelo A) — snapshot") },
-                            modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            supportingText = { Text("Redondeo 0,1h. Se guarda en Room. Excel NO recalcula.") }
+                            modifier = Modifier.fillMaxWidth()
                         )
 
                         OutlinedTextField(
@@ -276,44 +198,30 @@ fun TravelDetailScreen(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
 
-                        // Semáforo Modelo A
-                        val txtA = when (semaforoA) {
-                            true -> "🟢 Modelo A OK (imputadas ≤ sugeridas)"
-                            false -> "🔴 Modelo A NO (imputadas > sugeridas)"
-                            null -> "— Introduce KM fin y horas imputadas"
-                        }
-                        Text(txtA, fontWeight = FontWeight.SemiBold)
-
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
 
-                        // PASO 4 — MODELO EMPRESA
-                        Text("Modelo Empresa (X/Y)", fontWeight = FontWeight.Bold)
+                        Text("Empresa (X/Y)", fontWeight = FontWeight.Bold)
+                        Text("X: ${String.format(Locale.getDefault(), "%.2f", costeHoraEmpresaX)} €/h")
+                        Text("Y: ${String.format(Locale.getDefault(), "%.2f", tarifaObjetivoY)} €/h")
+                        Text("Tarifa efectiva: ${tarifaEfectiva?.let { String.format(Locale.getDefault(), "%.2f", it) } ?: "—"} €/h")
 
-                        Text("X (rentable mínimo): ${String.format(Locale.getDefault(), "%.2f", costeHoraEmpresaX)} €/h")
-                        Text("Y (con margen 15%): ${String.format(Locale.getDefault(), "%.2f", tarifaObjetivoY)} €/h")
+                        Text(
+                            when (semaforoEmpresaX) {
+                                true -> "🟢 Cumple X"
+                                false -> "🔴 No cumple X"
+                                null -> "—"
+                            },
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            when (semaforoEmpresaY) {
+                                true -> "🟢 Cumple Y"
+                                false -> "🟡 No llega a Y"
+                                null -> "—"
+                            }
+                        )
 
-                        val tarifaTxt = tarifaEfectiva?.let { String.format(Locale.getDefault(), "%.2f", it) } ?: "—"
-                        Text("Tarifa efectiva (F/h): $tarifaTxt €/h", fontWeight = FontWeight.SemiBold)
-
-                        val txtX = when (semaforoEmpresaX) {
-                            true -> "🟢 Cumple X (rentable mínimo)"
-                            false -> "🔴 No cumple X"
-                            null -> "— Introduce horas imputadas"
-                        }
-                        Text(txtX, fontWeight = FontWeight.SemiBold)
-
-                        val txtY = when (semaforoEmpresaY) {
-                            true -> "🟢 Cumple Y (objetivo con margen)"
-                            false -> "🟡 No llega a Y (info secundaria)"
-                            null -> "—"
-                        }
-                        Text(txtY)
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        errorMessage?.let {
-                            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        }
+                        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
                         Button(
                             onClick = {
@@ -326,10 +234,20 @@ fun TravelDetailScreen(
                                     return@Button
                                 }
 
-                                val ok = viewModel.closeCurrentTravel(
+                                val snaps = ParamSnapshots(
+                                    costeKmOperativo = COSTE_KM_OPERATIVO,
+                                    costeDietaFija = COSTE_DIETA_FIJA,
+                                    porcBenefExigidoA = PORC_BENEF_EXIGIDO_A,
+                                    costeHoraAlejandro = COSTE_HORA_ALEJANDRO,
+                                    costeHoraEmpresaX = costeHoraEmpresaX,
+                                    tarifaObjetivoY = tarifaObjetivoY
+                                )
+
+                                val ok = viewModel.closeCurrentTravelWithSnapshots(
                                     kmEnd = endKm,
                                     hoursImputed = imputed,
-                                    hoursCalculated = calculated
+                                    hoursCalculated = calculated,
+                                    snaps = snaps
                                 )
 
                                 if (ok) {
@@ -340,8 +258,7 @@ fun TravelDetailScreen(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            shape = MaterialTheme.shapes.medium
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
                             Text("CERRAR VIAJE DEFINITIVAMENTE", fontWeight = FontWeight.Bold)
                         }
