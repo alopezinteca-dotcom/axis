@@ -4,29 +4,27 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.TypeConverters
 
-@Database(
-    entities = [TravelEntity::class],
-    version = 1,
-    exportSchema = false
-)
-@TypeConverters(Converters::class)
+@Database(entities = [TravelEntity::class], version = 2, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
-
+    
     abstract fun travelDao(): TravelDao
 
     companion object {
         @Volatile
-        private var instance: AppDatabase? = null
+        private var INSTANCE: AppDatabase? = null
 
-        fun getInstance(context: Context): AppDatabase {
-            return instance ?: synchronized(this) {
-                instance ?: Room.databaseBuilder(
+        fun getDatabase(context: Context): AppDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "axis.db"
-                ).build().also { instance = it }
+                    "app_database"
+                )
+                .fallbackToDestructiveMigration() // 🟢 Destruye la v1 y crea la v2 limpia
+                .build()
+                INSTANCE = instance
+                instance
             }
         }
     }
