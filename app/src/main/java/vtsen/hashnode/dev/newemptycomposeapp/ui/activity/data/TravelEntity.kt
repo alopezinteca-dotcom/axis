@@ -7,17 +7,21 @@ import java.util.UUID
 @Entity(tableName = "travels")
 data class TravelEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
+
     val origin: String,
     val destination: String,
     val description: String,
+
     val kmStart: Int,
     val kmEnd: Int? = null,
+
     val billingExpected: Double,
     val hasDiet: Boolean,
+
     val status: TravelStatus = TravelStatus.IN_PROGRESS,
     val startTimestamp: Long = System.currentTimeMillis(),
     val endTimestamp: Long? = null,
-    
+
     // Motor de horas y snapshots financieros
     val hoursDraft: Double? = null,
     val hoursCalculatedSnapshot: Double? = null,
