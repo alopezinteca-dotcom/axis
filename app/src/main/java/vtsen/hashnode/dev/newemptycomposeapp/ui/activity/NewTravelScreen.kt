@@ -43,7 +43,6 @@ fun NewTravelScreen(
     val fusedLocationClient = remember { LocationServices.getFusedLocationProviderClient(context) }
     val geocoder = remember { Geocoder(context, Locale.getDefault()) }
 
-    // Estados con rememberSaveable para rotación
     var origin by rememberSaveable { mutableStateOf("") }
     var destination by rememberSaveable { mutableStateOf("") }
     var description by rememberSaveable { mutableStateOf("") }
@@ -51,9 +50,12 @@ fun NewTravelScreen(
     var billing by rememberSaveable { mutableStateOf("") }
     var hasDiet by rememberSaveable { mutableStateOf(false) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    var isFetchingLocation by rememberSaveable { mutableStateOf(false) }
+    
+    // Mejora UX-A: No persistir estados volátiles de UI
+    var isFetchingLocation by remember { mutableStateOf(false) }
+    // Mejora UX-B: Feedback visual de autocompletado
+    var isGpsAutocompleted by remember { mutableStateOf(false) }
 
-    // Validaciones derivadas (Mejora UX-A)
     val isKmError by remember { derivedStateOf { kmStart.isNotEmpty() && kmStart.toIntOrNull() == null } }
     val isBillingError by remember { 
         derivedStateOf { 
@@ -70,22 +72,24 @@ fun NewTravelScreen(
         }
     }
 
-    // Lógica de GPS y Geocoding
     fun fetchAddress(location: Location) {
         coroutineScope.launch {
             try {
                 if (!Geocoder.isPresent()) {
                     origin = "${location.latitude}, ${location.longitude}"
                     isFetchingLocation = false
+                    isGpsAutocompleted = true
                     return@launch
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     geocoder.getFromLocation(location.latitude, location.longitude, 1) { addresses ->
                         val address = addresses.firstOrNull()?.getAddressLine(0)
-                        coroutineScope.launch(Dispatchers.Main) {
+                        // Limpieza 3: coroutineScope.launch hereda Main por defecto en Compose
+                        coroutineScope.launch {
                             origin = address ?: "${location.latitude}, ${location.longitude}"
                             isFetchingLocation = false
+                            isGpsAutocompleted = true
                         }
                     }
                 } else {
@@ -96,12 +100,14 @@ fun NewTravelScreen(
                         withContext(Dispatchers.Main) {
                             origin = address ?: "${location.latitude}, ${location.longitude}"
                             isFetchingLocation = false
+                            isGpsAutocompleted = true
                         }
                     }
                 }
             } catch (e: Exception) {
                 origin = "${location.latitude}, ${location.longitude}"
                 isFetchingLocation = false
+                isGpsAutocompleted = true
             }
         }
     }
@@ -135,8 +141,11 @@ fun NewTravelScreen(
 
     fun onLocationClick() {
         errorMessage = null
+        // 🟢 Corrección 1: Comprobar tanto FINE como COARSE
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (fine) {
+        val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        
+        if (fine || coarse) {
             isFetchingLocation = true
             coroutineScope.launch { getFreshLocation() }
         } else {
@@ -152,110 +161,122 @@ fun NewTravelScreen(
             )
         }
     ) { padding ->
-        Row(
+        // 🟢 Corrección 2: Column es el que scrollea, protegiendo el diseño frente al teclado
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // COLUMNA IZQUIERDA: RUTA Y CONTEXTO
-            Card(
-                modifier = Modifier.weight(1f),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Ruta y Contexto", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    
-                    OutlinedTextField(
-                        value = origin,
-                        onValueChange = { origin = it },
-                        label = { Text("Origen") },
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = {
-                            if (isFetchingLocation) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                            else IconButton(onClick = { onLocationClick() }, enabled = !isFetchingLocation) {
-                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                // COLUMNA IZQUIERDA: RUTA Y CONTEXTO
+                Card(
+                    modifier = Modifier.weight(1f),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("Ruta y Contexto", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        
+                        OutlinedTextField(
+                            value = origin,
+                            onValueChange = { 
+                                origin = it
+                                isGpsAutocompleted = false // Se borra la marca si edita a mano
+                            },
+                            label = { Text("Origen") },
+                            modifier = Modifier.fillMaxWidth(),
+                            supportingText = {
+                                if (isGpsAutocompleted) {
+                                    Text("📍 Autocompletado por GPS", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                                }
+                            },
+                            trailingIcon = {
+                                if (isFetchingLocation) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                else IconButton(onClick = { onLocationClick() }, enabled = !isFetchingLocation) {
+                                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                }
                             }
-                        }
-                    )
+                        )
 
-                    OutlinedTextField(
-                        value = destination,
-                        onValueChange = { destination = it },
-                        label = { Text("Destino previsto") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        OutlinedTextField(
+                            value = destination,
+                            onValueChange = { destination = it },
+                            label = { Text("Destino previsto") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
 
-                    OutlinedTextField(
-                        value = description,
-                        onValueChange = { description = it },
-                        label = { Text("Descripción / Expediente") },
-                        modifier = Modifier.fillMaxWidth(),
-                        minLines = 4
-                    )
+                        OutlinedTextField(
+                            value = description,
+                            onValueChange = { description = it },
+                            label = { Text("Descripción / Expediente") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4
+                        )
+                    }
                 }
-            }
 
-            // COLUMNA DERECHA: ECONOMÍA Y ACCIÓN
-            Card(
-                modifier = Modifier.weight(1f),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    Text("Métricas y Economía", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                // COLUMNA DERECHA: ECONOMÍA Y ACCIÓN
+                Card(
+                    modifier = Modifier.weight(1f),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Text("Métricas y Economía", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-                    OutlinedTextField(
-                        value = kmStart,
-                        onValueChange = { kmStart = it },
-                        label = { Text("Kilómetros inicio") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        isError = isKmError,
-                        supportingText = { if (isKmError) Text("Introduce un número entero") }
-                    )
+                        OutlinedTextField(
+                            value = kmStart,
+                            onValueChange = { kmStart = it },
+                            label = { Text("Kilómetros inicio") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            isError = isKmError,
+                            supportingText = { if (isKmError) Text("Introduce un número entero") }
+                        )
 
-                    OutlinedTextField(
-                        value = billing,
-                        onValueChange = { billing = it },
-                        label = { Text("Facturación (€)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        isError = isBillingError,
-                        supportingText = { if (isBillingError) Text("Usa punto o coma para decimales") }
-                    )
+                        OutlinedTextField(
+                            value = billing,
+                            onValueChange = { billing = it },
+                            label = { Text("Facturación (€)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            isError = isBillingError,
+                            supportingText = { if (isBillingError) Text("Usa punto o coma para decimales") }
+                        )
 
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = hasDiet, onCheckedChange = { hasDiet = it })
-                        Text("Incluir dieta fija")
-                    }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = hasDiet, onCheckedChange = { hasDiet = it })
+                            Text("Incluir dieta fija")
+                        }
 
-                    Spacer(modifier = Modifier.weight(1f))
+                        Spacer(modifier = Modifier.weight(1f))
 
-                    if (errorMessage != null) {
-                        Text(errorMessage!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                    }
+                        if (errorMessage != null) {
+                            Text(errorMessage!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
 
-                    Button(
-                        onClick = {
-                            // Mejora UX-B: Limpiar la coma antes de guardar
-                            val cleanBilling = billing.replace(',', '.').toDoubleOrNull() ?: 0.0
-                            val success = viewModel.startTravel(
-                                origin = origin,
-                                destination = destination,
-                                description = description,
-                                kmStart = kmStart.toIntOrNull() ?: 0,
-                                billingExpected = cleanBilling,
-                                hasDiet = hasDiet
-                            )
-                            if (success) onStartTravel()
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = canConfirm,
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        Text("CONFIRMAR Y EMPEZAR VIAJE", fontWeight = FontWeight.Bold)
+                        Button(
+                            onClick = {
+                                val cleanBilling = billing.replace(',', '.').toDoubleOrNull() ?: 0.0
+                                val success = viewModel.startTravel(
+                                    origin = origin,
+                                    destination = destination,
+                                    description = description,
+                                    kmStart = kmStart.toIntOrNull() ?: 0,
+                                    billingExpected = cleanBilling,
+                                    hasDiet = hasDiet
+                                )
+                                if (success) onStartTravel()
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = canConfirm,
+                            shape = MaterialTheme.shapes.medium
+                        ) {
+                            Text("CONFIRMAR Y EMPEZAR VIAJE", fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
