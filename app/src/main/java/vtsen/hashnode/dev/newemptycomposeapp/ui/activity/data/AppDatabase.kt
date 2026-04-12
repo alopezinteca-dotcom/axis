@@ -27,7 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "axis.db"
                 )
-                    // ✅ DEV: evita crash tras añadir columnas
+                    // DEV: evita crash por cambios de columnas
                     .fallbackToDestructiveMigration()
                     .build()
 
