@@ -1,8 +1,4 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import kotlin.math.abs
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vtsen.hashnode.dev
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -11,33 +7,27 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 
+data class ParamSnapshots(
+    val costeKmOperativo: Double,
+    val costeDietaFija: Double,
+    val porcBenefExigidoA: Double,
+    val costeHoraAlejandro: Double,
+    val costeHoraEmpresaX: Double,
+    val tarifaObjetivoY: Double
+)
+
 class ActivityViewModel(
     private val repository: TravelRepository
 ) : ViewModel() {
 
-    // ✅ Todos los viajes (KPIs del mes + export)
     val allTravels: StateFlow<List<TravelEntity>> =
-        repository.allTravels.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        repository.allTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ✅ Viaje en curso (si existe)
     val currentTravel: StateFlow<TravelEntity?> =
-        repository.currentTravel.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
-        )
+        repository.currentTravel.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    // ✅ Viajes cerrados (export y listas)
     val exportData: StateFlow<List<TravelEntity>> =
-        repository.closedTravels.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        repository.closedTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun startTravel(
         origin: String,
@@ -67,7 +57,6 @@ class ActivityViewModel(
         return true
     }
 
-    // ✅ Guardar horas provisionales (draft) mientras está EN CURSO
     fun updateHoursDraft(hoursDraft: Double?): Boolean {
         val current = currentTravel.value ?: return false
         if (hoursDraft != null && hoursDraft < 0.0) return false
@@ -78,11 +67,30 @@ class ActivityViewModel(
         return true
     }
 
-    // ✅ Cerrar viaje: guarda snapshot + imputadas + flags (sin recálculo en Excel)
+    // ✅ Método anterior (se mantiene por compatibilidad)
     fun closeCurrentTravel(
         kmEnd: Int,
         hoursImputed: Double,
         hoursCalculated: Double
+    ): Boolean {
+        // Si lo llaman sin snapshots, usamos valores por defecto de tu hoja
+        val defaults = ParamSnapshots(
+            costeKmOperativo = 0.19,
+            costeDietaFija = 12.0,
+            porcBenefExigidoA = 0.35,
+            costeHoraAlejandro = 26.0,
+            costeHoraEmpresaX = 36.65,
+            tarifaObjetivoY = 42.14
+        )
+        return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
+    }
+
+    // ✅ NUEVO (PASO 6): cierre guardando snapshots reales usados
+    fun closeCurrentTravelWithSnapshots(
+        kmEnd: Int,
+        hoursImputed: Double,
+        hoursCalculated: Double,
+        snaps: ParamSnapshots
     ): Boolean {
         val current = currentTravel.value ?: return false
 
@@ -92,10 +100,7 @@ class ActivityViewModel(
 
         val delta = hoursImputed - hoursCalculated
         val modified = abs(delta) > 0.01
-
-        // Placeholder hasta Settings (DataStore)
-        val costeHoraAlejandro = 26.0
-        val impact = delta * costeHoraAlejandro
+        val impact = delta * snaps.costeHoraAlejandro
 
         viewModelScope.launch {
             repository.closeTravel(
@@ -106,14 +111,20 @@ class ActivityViewModel(
                 hoursImputed = hoursImputed,
                 hoursModified = modified,
                 deltaHours = delta,
-                impactEuroAlejandro = impact
+                impactEuroAlejandro = impact,
+                snapCosteKmOperativo = snaps.costeKmOperativo,
+                snapCosteDietaFija = snaps.costeDietaFija,
+                snapPorcBenefExigidoA = snaps.porcBenefExigidoA,
+                snapCosteHoraAlejandro = snaps.costeHoraAlejandro,
+                snapCosteHoraEmpresaX = snaps.costeHoraEmpresaX,
+                snapTarifaObjetivoY = snaps.tarifaObjetivoY
             )
         }
         return true
     }
 
-    // Compatibilidad con llamadas antiguas (ya no hace falta porque exportData es Flow->StateFlow)
-    fun prepareExport() {
-        // Intencionadamente vacío
-    }
+    fun prepareExport() { /* compat */ }
 }
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
