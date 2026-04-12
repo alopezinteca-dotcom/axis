@@ -1,7 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui
 
-import.ComponentActivityimport android.os.Bundle
-import androidx.activity.compose.BackHandler
+import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,12 +64,12 @@ private sealed class Screen {
 private fun AxisApp() {
     val context = LocalContext.current
 
-    // ✅ ViewModel Módulo Activity (Room)
+    // ViewModel Módulo Activity (Room)
     val activityViewModel: ActivityViewModel = viewModel(
         factory = ActivityViewModelFactory(context)
     )
 
-    // ✅ ViewModel Ajustes (DataStore)
+    // ViewModel Ajustes (DataStore)
     val settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModelFactory(context)
     )
@@ -106,8 +105,7 @@ private fun AxisApp() {
             onStartTravel = { currentScreen = Screen.TravelDetail }
         )
 
-        // ✅ AQUÍ ESTÁ LA CORRECCIÓN DEL PASO 6:
-        // TravelDetailScreen ahora recibe settingsViewModel
+        // ✅ CORRECCIÓN PASO 6
         Screen.TravelDetail -> TravelDetailScreen(
             viewModel = activityViewModel,
             settingsViewModel = settingsViewModel,
@@ -145,8 +143,6 @@ private fun AxisMenuScreen(
                 .padding(48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-
-            // IZQUIERDA (40%) Branding
             Column(
                 modifier = Modifier
                     .weight(0.4f)
@@ -167,7 +163,6 @@ private fun AxisMenuScreen(
                 )
             }
 
-            // DERECHA (60%) Navegación
             Column(
                 modifier = Modifier
                     .weight(0.6f)
@@ -228,10 +223,6 @@ private fun AxisMenuCard(
     }
 }
 
-/* =========================================================
-   Placeholder Location (Módulo 2)
-   ========================================================= */
-
 @Composable
 private fun LocationComingSoonScreen(onBack: () -> Unit) {
     Surface(
@@ -244,18 +235,12 @@ private fun LocationComingSoonScreen(onBack: () -> Unit) {
                 .padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            Text("Location (Módulo 2)", style = MaterialTheme.typography.displaySmall)
             Text(
-                text = "Location (Módulo 2)",
-                style = MaterialTheme.typography.displaySmall
-            )
-            Text(
-                text = "Próximamente: simulador GPS / ubicaciones.\n" +
-                    "Este módulo se implementará después.",
+                "Próximamente: simulador GPS / ubicaciones.\nEste módulo se implementará después.",
                 style = MaterialTheme.typography.bodyLarge
             )
-
             Spacer(modifier = Modifier.height(8.dp))
-
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -273,3 +258,4 @@ private fun LocationComingSoonScreen(onBack: () -> Unit) {
         }
     }
 }
+import androidx.activity.ComponentActivity
