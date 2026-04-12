@@ -1,6 +1,8 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui
 
 import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,12 +66,10 @@ private sealed class Screen {
 private fun AxisApp() {
     val context = LocalContext.current
 
-    // ViewModel Módulo Activity (Room)
     val activityViewModel: ActivityViewModel = viewModel(
         factory = ActivityViewModelFactory(context)
     )
 
-    // ViewModel Ajustes (DataStore)
     val settingsViewModel: SettingsViewModel = viewModel(
         factory = SettingsViewModelFactory(context)
     )
@@ -105,7 +105,6 @@ private fun AxisApp() {
             onStartTravel = { currentScreen = Screen.TravelDetail }
         )
 
-        // ✅ CORRECCIÓN PASO 6
         Screen.TravelDetail -> TravelDetailScreen(
             viewModel = activityViewModel,
             settingsViewModel = settingsViewModel,
@@ -122,10 +121,6 @@ private fun AxisApp() {
         )
     }
 }
-
-/* =========================================================
-   MENÚ Premium (40/60): Activity / Location / Settings
-   ========================================================= */
 
 @Composable
 private fun AxisMenuScreen(
@@ -171,27 +166,11 @@ private fun AxisMenuScreen(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                AxisMenuCard(
-                    title = "Activity",
-                    subtitle = "Viajes, horas, rentabilidad, exportación",
-                    onClick = onActivityClick
-                )
-
+                AxisMenuCard("Activity", "Viajes, horas, rentabilidad, exportación", onActivityClick)
                 Spacer(modifier = Modifier.height(24.dp))
-
-                AxisMenuCard(
-                    title = "Location",
-                    subtitle = "GPS / ubicaciones (Módulo 2)",
-                    onClick = onLocationClick
-                )
-
+                AxisMenuCard("Location", "GPS / ubicaciones (Módulo 2)", onLocationClick)
                 Spacer(modifier = Modifier.height(24.dp))
-
-                AxisMenuCard(
-                    title = "Settings",
-                    subtitle = "Parámetros del modelo (DataStore)",
-                    onClick = onSettingsClick
-                )
+                AxisMenuCard("Settings", "Parámetros del modelo (DataStore)", onSettingsClick)
             }
         }
     }
@@ -225,10 +204,7 @@ private fun AxisMenuCard(
 
 @Composable
 private fun LocationComingSoonScreen(onBack: () -> Unit) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -258,4 +234,3 @@ private fun LocationComingSoonScreen(onBack: () -> Unit) {
         }
     }
 }
-import androidx.activity.ComponentActivity
