@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,7 +28,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,11 +57,11 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.TravelCsvExporte
 @Composable
 fun ActivityHomeScreen(
     viewModel: ActivityViewModel,
-    onNewTravelClick: () -> Unit
+    onNewTravelClick: () -> Unit,
+    onCurrentTravelClick: () -> Unit
 ) {
     val context = LocalContext.current
 
-    // UI premium: coroutines + snackbar + estado exporting
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var isExporting by remember { mutableStateOf(false) }
@@ -69,53 +69,33 @@ fun ActivityHomeScreen(
     val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
 
-    // Mes actual (rango fijo para filtros)
     val (monthStart, monthEnd) = remember { currentMonthRangeMillis() }
 
     val monthTravels by remember(allTravels, monthStart, monthEnd) {
         derivedStateOf { allTravels.filter { it.startTimestamp in monthStart..monthEnd } }
     }
-
-    // ✅ Evitar capturas “stale” dentro de coroutines
     val monthTravelsLatest by rememberUpdatedState(monthTravels)
 
-    val monthBillingTotal by remember(monthTravels) {
-        derivedStateOf { monthTravels.sumOf { it.billingExpected } }
-    }
-    val monthTripsTotal by remember(monthTravels) {
-        derivedStateOf { monthTravels.size }
-    }
+    val monthBillingTotal by remember(monthTravels) { derivedStateOf { monthTravels.sumOf { it.billingExpected } } }
+    val monthTripsTotal by remember(monthTravels) { derivedStateOf { monthTravels.size } }
     val monthClosedImputedHours by remember(monthTravels) {
-        derivedStateOf {
-            monthTravels
-                .filter { it.status == TravelStatus.CLOSED }
-                .sumOf { it.hoursImputed ?: 0.0 }
-        }
+        derivedStateOf { monthTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
     }
-    val draftInProgress by remember(currentTravel) {
-        derivedStateOf { currentTravel?.hoursDraft }
-    }
+    val draftInProgress by remember(currentTravel) { derivedStateOf { currentTravel?.hoursDraft } }
     val monthModifiedCount by remember(monthTravels) {
-        derivedStateOf {
-            monthTravels.count { it.status == TravelStatus.CLOSED && it.hoursModified }
-        }
+        derivedStateOf { monthTravels.count { it.status == TravelStatus.CLOSED && it.hoursModified } }
     }
 
     fun triggerExport(folderUri: Uri) {
         if (isExporting) return
-
         isExporting = true
+
         val fileName = ExportUtils.currentMonthFileName()
 
         coroutineScope.launch {
             try {
-                // ⚠️ Operaciones SAF/Drive fuera del hilo principal (evita jank/ANR)
                 withContext(Dispatchers.IO) {
-                    exportMonthlyCsvIO(
-                        context = context,
-                        folderUri = folderUri,
-                        travels = monthTravelsLatest
-                    )
+                    exportMonthlyCsvIO(context, folderUri, monthTravelsLatest)
                 }
                 snackbarHostState.showSnackbar("✅ Exportado: $fileName")
             } catch (e: Exception) {
@@ -155,61 +135,23 @@ fun ActivityHomeScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // ==========================================
-            // PANEL IZQUIERDO (35%) — KPI Cards + Export
-            // ==========================================
+            // PANEL IZQUIERDO 35%: KPIs + Export
             Column(
-                modifier = Modifier
-                    .weight(0.35f)
-                    .fillMaxHeight(),
+                modifier = Modifier.weight(0.35f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                Text("Resumen mensual", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
-                Text(
-                    text = "Resumen mensual",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                KpiCard(
-                    title = "Facturación mes (total)",
-                    value = formatCurrency(monthBillingTotal),
-                    subtitle = "Cerrados + en curso",
-                    color = MaterialTheme.colorScheme.primaryContainer
-                )
+                KpiCard("Facturación mes (total)", formatCurrency(monthBillingTotal), "Cerrados + en curso", MaterialTheme.colorScheme.primaryContainer)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KpiCard(
-                        title = "Viajes del mes",
-                        value = monthTripsTotal.toString(),
-                        subtitle = "Totales",
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    KpiCard(
-                        title = "Modificados",
-                        value = "$monthModifiedCount ⚠️",
-                        subtitle = "Imputadas ≠ calc.",
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        modifier = Modifier.weight(1f)
-                    )
+                    KpiCard("Viajes del mes", monthTripsTotal.toString(), "Totales", MaterialTheme.colorScheme.surfaceVariant, Modifier.weight(1f))
+                    KpiCard("Modificados", "$monthModifiedCount ⚠️", "Imputadas ≠ calc.", MaterialTheme.colorScheme.errorContainer, Modifier.weight(1f))
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    KpiCard(
-                        title = "Horas cerradas",
-                        value = formatHours(monthClosedImputedHours),
-                        subtitle = "Imputadas",
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    KpiCard(
-                        title = "Horas draft",
-                        value = draftInProgress?.let { formatHours(it) } ?: "—",
-                        subtitle = "En curso",
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.weight(1f)
-                    )
+                    KpiCard("Horas cerradas", formatHours(monthClosedImputedHours), "Imputadas", MaterialTheme.colorScheme.surfaceVariant, Modifier.weight(1f))
+                    KpiCard("Horas draft", draftInProgress?.let { formatHours(it) } ?: "—", "En curso", MaterialTheme.colorScheme.secondaryContainer, Modifier.weight(1f))
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -217,23 +159,13 @@ fun ActivityHomeScreen(
                 Button(
                     onClick = {
                         val folderUri = ExportPreferences.getFolderUri(context)
-                        if (folderUri == null) {
-                            folderPickerLauncher.launch(null)
-                        } else {
-                            triggerExport(folderUri)
-                        }
+                        if (folderUri == null) folderPickerLauncher.launch(null) else triggerExport(folderUri)
                     },
                     enabled = !isExporting,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = MaterialTheme.shapes.medium
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     if (isExporting) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             CircularProgressIndicator(strokeWidth = 2.dp)
                             Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
                         }
@@ -243,50 +175,35 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // ==========================================
-            // PANEL DERECHO (65%) — Línea de tiempo
-            // ==========================================
+            // PANEL DERECHO 65%: Timeline
             Column(
-                modifier = Modifier
-                    .weight(0.65f)
-                    .fillMaxHeight(),
+                modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "Línea de tiempo",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold
-                )
+                Text("Línea de tiempo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // Viaje en curso arriba
                     currentTravel?.let { t ->
                         item {
                             Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.errorContainer
-                                ),
-                                modifier = Modifier.fillMaxWidth()
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onCurrentTravelClick() }
                             ) {
                                 Column(Modifier.padding(16.dp)) {
-                                    Text(
-                                        "🟢 EN CURSO",
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.error
-                                    )
+                                    Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text("${t.origin} → ${t.destination}", style = MaterialTheme.typography.titleMedium)
                                     Text("KM inicio: ${t.kmStart} | Draft: ${t.hoursDraft ?: 0.0}h")
                                 }
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
 
-                    // Viajes cerrados del mes
                     val closedMonthTravels = monthTravels.filter { it.status == TravelStatus.CLOSED }
                     items(closedMonthTravels) { t ->
                         TravelRowCard(t)
@@ -302,7 +219,7 @@ private fun KpiCard(
     title: String,
     value: String,
     subtitle: String,
-    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
+    color: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -310,18 +227,10 @@ private fun KpiCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium)
-            Text(
-                value,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -329,65 +238,29 @@ private fun KpiCard(
 @Composable
 private fun TravelRowCard(travel: TravelEntity) {
     val warning = if (travel.hoursModified) " ⚠️" else ""
-
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "${travel.origin} → ${travel.destination}$warning",
-                    fontWeight = FontWeight.SemiBold
-                )
-                Text(
-                    text = "€ ${formatCurrencyNumber(travel.billingExpected)}",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
+                Text("€ ${formatCurrencyNumber(travel.billingExpected)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
-            Text(
-                "Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}",
-                style = MaterialTheme.typography.bodyMedium
-            )
-            Text(
-                "Ref: ${travel.description}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Text("Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
+            Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
-/* =========================================================
-   Trabajo pesado (SAF/Drive) fuera del hilo principal
-   ========================================================= */
-private fun exportMonthlyCsvIO(
-    context: Context,
-    folderUri: Uri,
-    travels: List<TravelEntity>
-) {
+private fun exportMonthlyCsvIO(context: Context, folderUri: Uri, travels: List<TravelEntity>) {
     val resolver = context.contentResolver
     val fileName = ExportUtils.currentMonthFileName()
 
     resolver.query(
-        DocumentsContract.buildChildDocumentsUriUsingTree(
-            folderUri,
-            DocumentsContract.getTreeDocumentId(folderUri)
-        ),
-        arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME
-        ),
-        null,
-        null,
-        null
+        DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, DocumentsContract.getTreeDocumentId(folderUri)),
+        arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+        null, null, null
     )?.use { cursor ->
         while (cursor.moveToNext()) {
             val documentId = cursor.getString(0)
@@ -420,9 +293,5 @@ private fun currentMonthRangeMillis(): Pair<Long, Long> {
 }
 
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
-
-private fun formatCurrencyNumber(value: Double): String =
-    String.format(Locale.getDefault(), "%.2f", value)
-
-private fun formatHours(value: Double): String =
-    String.format(Locale.getDefault(), "%.2f h", value)
+private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
+private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.2f h", value)
