@@ -50,7 +50,7 @@ object TravelCsvExporter {
                         hoursStr,
                         billingStr,
                         if (t.hasDiet) "SI" else "NO",
-                        t.status.name,
+                        t.status.name.sanitizeCsv(),
                         formatter.format(Date(t.startTimestamp)),
                         t.endTimestamp?.let { formatter.format(Date(it)) } ?: ""
                     ).joinToString(";")
