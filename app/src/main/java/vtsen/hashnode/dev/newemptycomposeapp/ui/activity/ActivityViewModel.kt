@@ -1,4 +1,8 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vtsen.hashnode.dev
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlin.math.abs
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -21,13 +25,25 @@ class ActivityViewModel(
 ) : ViewModel() {
 
     val allTravels: StateFlow<List<TravelEntity>> =
-        repository.allTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        repository.allTravels.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
     val currentTravel: StateFlow<TravelEntity?> =
-        repository.currentTravel.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        repository.currentTravel.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = null
+        )
 
     val exportData: StateFlow<List<TravelEntity>> =
-        repository.closedTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        repository.closedTravels.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
 
     fun startTravel(
         origin: String,
@@ -67,13 +83,12 @@ class ActivityViewModel(
         return true
     }
 
-    // ✅ Método anterior (se mantiene por compatibilidad)
+    // Compatibilidad: si alguien llama sin snapshots, usamos defaults
     fun closeCurrentTravel(
         kmEnd: Int,
         hoursImputed: Double,
         hoursCalculated: Double
     ): Boolean {
-        // Si lo llaman sin snapshots, usamos valores por defecto de tu hoja
         val defaults = ParamSnapshots(
             costeKmOperativo = 0.19,
             costeDietaFija = 12.0,
@@ -82,10 +97,14 @@ class ActivityViewModel(
             costeHoraEmpresaX = 36.65,
             tarifaObjetivoY = 42.14
         )
-        return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
+        return closeCurrentTravelWithSnapshots(
+            kmEnd = kmEnd,
+            hoursImputed = hoursImputed,
+            hoursCalculated = hoursCalculated,
+            snaps = defaults
+        )
     }
 
-    // ✅ NUEVO (PASO 6): cierre guardando snapshots reales usados
     fun closeCurrentTravelWithSnapshots(
         kmEnd: Int,
         hoursImputed: Double,
@@ -123,8 +142,7 @@ class ActivityViewModel(
         return true
     }
 
-    fun prepareExport() { /* compat */ }
+    fun prepareExport() {
+        // Intencionadamente vacío (compat)
+    }
 }
-
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
