@@ -14,11 +14,12 @@ interface TravelDao {
     @Query("SELECT * FROM travels ORDER BY startTimestamp DESC")
     fun getAllTravels(): Flow<List<TravelEntity>>
 
-    @Query("SELECT * FROM travels WHERE status = 'IN_PROGRESS' LIMIT 1")
-    fun getCurrentTravel(): Flow<TravelEntity?>
+    // ✅ Mejor que hardcodear strings
+    @Query("SELECT * FROM travels WHERE status = :status LIMIT 1")
+    fun getCurrentTravel(status: TravelStatus = TravelStatus.IN_PROGRESS): Flow<TravelEntity?>
 
-    @Query("SELECT * FROM travels WHERE status = 'CLOSED' ORDER BY startTimestamp DESC")
-    fun getClosedTravels(): Flow<List<TravelEntity>>
+    @Query("SELECT * FROM travels WHERE status = :status ORDER BY startTimestamp DESC")
+    fun getClosedTravels(status: TravelStatus = TravelStatus.CLOSED): Flow<List<TravelEntity>>
 
     @Query("SELECT * FROM travels WHERE id = :id")
     suspend fun getTravelById(id: String): TravelEntity?
@@ -29,9 +30,13 @@ interface TravelDao {
     @Update
     suspend fun updateTravel(travel: TravelEntity)
 
+    // ✅ Motor “horas en curso”
+    @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
+    suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
+
     @Delete
     suspend fun deleteTravel(travel: TravelEntity)
-    
+
     @Query("DELETE FROM travels")
     suspend fun deleteAllTravels()
 }
