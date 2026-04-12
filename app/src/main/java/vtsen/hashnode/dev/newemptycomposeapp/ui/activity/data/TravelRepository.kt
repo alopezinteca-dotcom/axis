@@ -2,33 +2,40 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data
 
 import kotlinx.coroutines.flow.Flow
 
-class TravelRepository(private val travelDao: TravelDao) {
-
+class TravelRepository(
+    private val travelDao: TravelDao
+) {
     val allTravels: Flow<List<TravelEntity>> = travelDao.getAllTravels()
     val currentTravel: Flow<TravelEntity?> = travelDao.getCurrentTravel()
     val closedTravels: Flow<List<TravelEntity>> = travelDao.getClosedTravels()
 
-    suspend fun getTravelById(id: String): TravelEntity? {
-        return travelDao.getTravelById(id)
-    }
-
     suspend fun insertTravel(travel: TravelEntity) {
         travelDao.insertTravel(travel)
-    }
-
-    suspend fun updateTravel(travel: TravelEntity) {
-        travelDao.updateTravel(travel)
     }
 
     suspend fun updateHoursDraft(id: String, hoursDraft: Double?) {
         travelDao.updateHoursDraft(id, hoursDraft)
     }
 
-    suspend fun deleteTravel(travel: TravelEntity) {
-        travelDao.deleteTravel(travel)
-    }
-
-    suspend fun deleteAllTravels() {
-        travelDao.deleteAllTravels()
+    suspend fun closeTravel(
+        id: String,
+        kmEnd: Int,
+        endTimestamp: Long,
+        hoursCalculatedSnapshot: Double,
+        hoursImputed: Double,
+        hoursModified: Boolean,
+        deltaHours: Double,
+        impactEuroAlejandro: Double
+    ) {
+        travelDao.closeTravel(
+            id = id,
+            kmEnd = kmEnd,
+            endTimestamp = endTimestamp,
+            hoursCalculatedSnapshot = hoursCalculatedSnapshot,
+            hoursImputed = hoursImputed,
+            hoursModified = hoursModified,
+            deltaHours = deltaHours,
+            impactEuroAlejandro = impactEuroAlejandro
+        )
     }
 }
