@@ -3,36 +3,53 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportPreferences
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportUtils
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.TravelCsvExporter
@@ -43,45 +60,159 @@ fun ActivityHomeScreen(
     onNewTravelClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
-    val closedTravels by viewModel.exportData.collectAsStateWithLifecycle()
 
-    LaunchedEffect(Unit) {
-        viewModel.prepareExport()
+    // UI premium: coroutines + snackbar + estado exporting
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var isExporting by remember { mutableStateOf(false) }
+
+    val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
+    val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
+
+    // Mes actual (rango fijo para filtros)
+    val (monthStart, monthEnd) = remember { currentMonthRangeMillis() }
+
+    val monthTravels by remember(allTravels, monthStart, monthEnd) {
+        derivedStateOf { allTravels.filter { it.startTimestamp in monthStart..monthEnd } }
+    }
+
+    // ✅ Evitar capturas “stale” dentro de coroutines
+    val monthTravelsLatest by rememberUpdatedState(monthTravels)
+
+    val monthBillingTotal by remember(monthTravels) {
+        derivedStateOf { monthTravels.sumOf { it.billingExpected } }
+    }
+    val monthTripsTotal by remember(monthTravels) {
+        derivedStateOf { monthTravels.size }
+    }
+    val monthClosedImputedHours by remember(monthTravels) {
+        derivedStateOf {
+            monthTravels
+                .filter { it.status == TravelStatus.CLOSED }
+                .sumOf { it.hoursImputed ?: 0.0 }
+        }
+    }
+    val draftInProgress by remember(currentTravel) {
+        derivedStateOf { currentTravel?.hoursDraft }
+    }
+    val monthModifiedCount by remember(monthTravels) {
+        derivedStateOf {
+            monthTravels.count { it.status == TravelStatus.CLOSED && it.hoursModified }
+        }
+    }
+
+    fun triggerExport(folderUri: Uri) {
+        if (isExporting) return
+
+        isExporting = true
+        val fileName = ExportUtils.currentMonthFileName()
+
+        coroutineScope.launch {
+            try {
+                // ⚠️ Operaciones SAF/Drive fuera del hilo principal (evita jank/ANR)
+                withContext(Dispatchers.IO) {
+                    exportMonthlyCsvIO(
+                        context = context,
+                        folderUri = folderUri,
+                        travels = monthTravelsLatest
+                    )
+                }
+                snackbarHostState.showSnackbar("✅ Exportado: $fileName")
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
+            } finally {
+                isExporting = false
+            }
+        }
     }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
+        ActivityResultContracts.OpenDocumentTree()
     ) { uri ->
         uri?.let {
             ExportPreferences.saveFolderUri(context, it)
-            exportMonthlyCsv(context, it, closedTravels)
+            triggerExport(it)
         }
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewTravelClick) {
-                Text("+")
+            FloatingActionButton(
+                onClick = onNewTravelClick,
+                containerColor = MaterialTheme.colorScheme.primary
+            ) {
+                Text("+", style = MaterialTheme.typography.titleLarge)
             }
         }
     ) { padding ->
-        Column(
+
+        Row(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+
+            // ==========================================
+            // PANEL IZQUIERDO (35%) — KPI Cards + Export
+            // ==========================================
+            Column(
+                modifier = Modifier
+                    .weight(0.35f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+
                 Text(
-                    text = "Resumen Activity",
-                    style = MaterialTheme.typography.headlineMedium
+                    text = "Resumen mensual",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
                 )
+
+                KpiCard(
+                    title = "Facturación mes (total)",
+                    value = formatCurrency(monthBillingTotal),
+                    subtitle = "Cerrados + en curso",
+                    color = MaterialTheme.colorScheme.primaryContainer
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KpiCard(
+                        title = "Viajes del mes",
+                        value = monthTripsTotal.toString(),
+                        subtitle = "Totales",
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    KpiCard(
+                        title = "Modificados",
+                        value = "$monthModifiedCount ⚠️",
+                        subtitle = "Imputadas ≠ calc.",
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    KpiCard(
+                        title = "Horas cerradas",
+                        value = formatHours(monthClosedImputedHours),
+                        subtitle = "Imputadas",
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    KpiCard(
+                        title = "Horas draft",
+                        value = draftInProgress?.let { formatHours(it) } ?: "—",
+                        subtitle = "En curso",
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
 
                 Button(
                     onClick = {
@@ -89,40 +220,77 @@ fun ActivityHomeScreen(
                         if (folderUri == null) {
                             folderPickerLauncher.launch(null)
                         } else {
-                            exportMonthlyCsv(context, folderUri, closedTravels)
+                            triggerExport(folderUri)
+                        }
+                    },
+                    enabled = !isExporting,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    shape = MaterialTheme.shapes.medium
+                ) {
+                    if (isExporting) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(strokeWidth = 2.dp)
+                            Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text("📤 EXPORTAR CSV A DRIVE", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // ==========================================
+            // PANEL DERECHO (65%) — Línea de tiempo
+            // ==========================================
+            Column(
+                modifier = Modifier
+                    .weight(0.65f)
+                    .fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Línea de tiempo",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    // Viaje en curso arriba
+                    currentTravel?.let { t ->
+                        item {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text(
+                                        "🟢 EN CURSO",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${t.origin} → ${t.destination}", style = MaterialTheme.typography.titleMedium)
+                                    Text("KM inicio: ${t.kmStart} | Draft: ${t.hoursDraft ?: 0.0}h")
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
                         }
                     }
-                ) {
-                    Text("Exportar CSV")
-                }
-            }
 
-            currentTravel?.let {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Viaje en curso", style = MaterialTheme.typography.titleMedium)
-                        Text("${it.origin} → ${it.destination}")
-                        Text("KM inicio: ${it.kmStart}")
+                    // Viajes cerrados del mes
+                    val closedMonthTravels = monthTravels.filter { it.status == TravelStatus.CLOSED }
+                    items(closedMonthTravels) { t ->
+                        TravelRowCard(t)
                     }
-                }
-            }
-
-            Text(
-                text = "Viajes cerrados este mes: ${closedTravels.size}",
-                style = MaterialTheme.typography.titleMedium
-            )
-
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(closedTravels) { travel ->
-                    ClosedTravelItem(travel)
                 }
             }
         }
@@ -130,41 +298,77 @@ fun ActivityHomeScreen(
 }
 
 @Composable
-private fun ClosedTravelItem(travel: TravelEntity) {
-    val formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy")
+private fun KpiCard(
+    title: String,
+    value: String,
+    subtitle: String,
+    color: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceVariant,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = color),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(title, style = MaterialTheme.typography.labelMedium)
+            Text(
+                value,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
 
-    val dateText = travel.endTimestamp?.let {
-        Instant.ofEpochMilli(it)
-            .atZone(ZoneId.systemDefault())
-            .toLocalDate()
-            .format(formatter)
-    } ?: ""
+@Composable
+private fun TravelRowCard(travel: TravelEntity) {
+    val warning = if (travel.hoursModified) " ⚠️" else ""
 
-    Card {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    Card(
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Column {
-                Text("${travel.origin} → ${travel.destination}", style = MaterialTheme.typography.bodyLarge)
-                Text(dateText, style = MaterialTheme.typography.bodySmall)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${travel.origin} → ${travel.destination}$warning",
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    text = "€ ${formatCurrencyNumber(travel.billingExpected)}",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            Column(horizontalAlignment = Alignment.End) {
-                Text("${travel.hoursImputed ?: 0.0} h")
-                Text("${travel.billingExpected} €", style = MaterialTheme.typography.bodySmall)
-            }
+            Text(
+                "Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                "Ref: ${travel.description}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
 /* =========================================================
-   EXPORTACIÓN CSV MENSUAL CON SOBRESCRITURA REAL Y AVISO
+   Trabajo pesado (SAF/Drive) fuera del hilo principal
    ========================================================= */
-
-private fun exportMonthlyCsv(
+private fun exportMonthlyCsvIO(
     context: Context,
     folderUri: Uri,
     travels: List<TravelEntity>
@@ -188,7 +392,6 @@ private fun exportMonthlyCsv(
         while (cursor.moveToNext()) {
             val documentId = cursor.getString(0)
             val displayName = cursor.getString(1)
-
             if (displayName == fileName) {
                 val fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, documentId)
                 DocumentsContract.deleteDocument(resolver, fileUri)
@@ -197,19 +400,29 @@ private fun exportMonthlyCsv(
         }
     }
 
-    val newFileUri = DocumentsContract.createDocument(
-        resolver,
-        folderUri,
-        "text/csv",
-        fileName
-    )
+    val newFileUri = DocumentsContract.createDocument(resolver, folderUri, "text/csv", fileName)
+        ?: throw IllegalStateException("No se pudo crear el archivo en Drive")
 
-    newFileUri?.let { uri ->
-        resolver.openOutputStream(uri)?.let { stream ->
-            TravelCsvExporter.writeCsv(stream, travels)
-        }
-        
-        // 🔹 El Toast para que la tablet te avise de que ha funcionado
-        Toast.makeText(context, "Exportado correctamente: $fileName", Toast.LENGTH_SHORT).show()
-    }
+    resolver.openOutputStream(newFileUri)?.use { stream ->
+        TravelCsvExporter.writeCsv(stream, travels)
+    } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento")
 }
+
+private fun currentMonthRangeMillis(): Pair<Long, Long> {
+    val now = LocalDate.now()
+    val start = now.with(TemporalAdjusters.firstDayOfMonth())
+    val end = now.with(TemporalAdjusters.lastDayOfMonth())
+
+    val zone = ZoneId.systemDefault()
+    val startMillis = start.atStartOfDay(zone).toInstant().toEpochMilli()
+    val endMillis = end.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli() - 1
+    return startMillis to endMillis
+}
+
+private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
+
+private fun formatCurrencyNumber(value: Double): String =
+    String.format(Locale.getDefault(), "%.2f", value)
+
+private fun formatHours(value: Double): String =
+    String.format(Locale.getDefault(), "%.2f h", value)
