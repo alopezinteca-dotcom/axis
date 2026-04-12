@@ -1,10 +1,4 @@
-rm -f app/src/main/res/values/colors.xml
-mkdir -p app/src/main/res/values
-
-cat > app/src/main/res/values/colors.xml <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="axis_launcher_bg">#0E1B2A</color>
     <color name="axis_launcher_fg">#FFFFFF</color>
 </resources>
-EOF
