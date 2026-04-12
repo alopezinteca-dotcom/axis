@@ -1,42 +1,26 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
+import.viewModelScopeimport androidx.lifecycle.ViewModel
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
-
-/* =========================================================
-   VIEWMODEL · ACTIVITY
-   ========================================================= */
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 
 class ActivityViewModel(
     private val repository: TravelRepository
 ) : ViewModel() {
 
-    /* ---------- VIAJE EN CURSO ---------- */
+    val currentTravel: StateFlow<TravelEntity?> =
+        repository.currentTravel
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    private val _currentTravel = MutableStateFlow<TravelEntity?>(null)
-    val currentTravel: StateFlow<TravelEntity?> = _currentTravel
-
-    /* ---------- DATOS PARA EXPORTACIÓN ---------- */
-
-    private val _exportData = MutableStateFlow<List<TravelEntity>>(emptyList())
-    val exportData: StateFlow<List<TravelEntity>> = _exportData
-
-    init {
-        loadTravelInProgress()
-    }
-
-    private fun loadTravelInProgress() {
-        viewModelScope.launch {
-            _currentTravel.value = repository.getTravelInProgress()
-        }
-    }
-
-    /* ---------- INICIAR VIAJE ---------- */
+    val exportData: StateFlow<List<TravelEntity>> =
+        repository.closedTravels
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun startTravel(
         origin: String,
@@ -46,53 +30,66 @@ class ActivityViewModel(
         billingExpected: Double,
         hasDiet: Boolean
     ): Boolean {
-        if (origin.isBlank()) return false
-        if (destination.isBlank()) return false
+        if (origin.isBlank() || destination.isBlank()) return false
         if (kmStart <= 0) return false
         if (billingExpected < 0) return false
 
         viewModelScope.launch {
-            repository.startTravel(
-                origin = origin.trim(),
-                destination = destination.trim(),
-                description = description.trim(),
-                kmStart = kmStart,
-                billingExpected = billingExpected,
-                hasDiet = hasDiet,
-                startTimestamp = System.currentTimeMillis()
+            repository.insertTravel(
+                TravelEntity(
+                    origin = origin.trim(),
+                    destination = destination.trim(),
+                    description = description.trim(),
+                    kmStart = kmStart,
+                    billingExpected = billingExpected,
+                    hasDiet = hasDiet,
+                    status = TravelStatus.IN_PROGRESS
+                )
             )
-            loadTravelInProgress()
         }
         return true
     }
 
-    /* ---------- CERRAR VIAJE ---------- */
+    fun updateHoursDraft(hoursDraft: Double?): Boolean {
+        val current = currentTravel.value ?: return false
+        if (hoursDraft != null && hoursDraft < 0.0) return false
+
+        viewModelScope.launch {
+            repository.updateHoursDraft(current.id, hoursDraft)
+        }
+        return true
+    }
 
     fun closeCurrentTravel(
         kmEnd: Int,
-        hoursImputed: Double
+        hoursImputed: Double,
+        hoursCalculated: Double
     ): Boolean {
-        val travel = _currentTravel.value ?: return false
-        if (kmEnd < travel.kmStart) return false
+        val current = currentTravel.value ?: return false
+
+        if (kmEnd < current.kmStart) return false
         if (hoursImputed <= 0.0) return false
+        if (hoursCalculated <= 0.0) return false
+
+        val delta = hoursImputed - hoursCalculated
+        val modified = abs(delta) > 0.01
+
+        // Placeholder hasta Settings (DataStore)
+        val costeHoraAlejandro = 25.0
+        val impact = delta * costeHoraAlejandro
 
         viewModelScope.launch {
             repository.closeTravel(
-                travelId = travel.id,
+                id = current.id,
                 kmEnd = kmEnd,
+                endTimestamp = System.currentTimeMillis(),
+                hoursCalculatedSnapshot = hoursCalculated,
                 hoursImputed = hoursImputed,
-                endTimestamp = System.currentTimeMillis()
+                hoursModified = modified,
+                deltaHours = delta,
+                impactEuroAlejandro = impact
             )
-            _currentTravel.value = null
         }
         return true
-    }
-
-    /* ---------- PREPARAR EXPORTACIÓN ---------- */
-
-    fun prepareExport() {
-        viewModelScope.launch {
-            _exportData.value = repository.exportClosedTravels()
-        }
     }
 }
