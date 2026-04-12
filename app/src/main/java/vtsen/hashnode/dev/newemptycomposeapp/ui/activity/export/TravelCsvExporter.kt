@@ -8,37 +8,30 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 
 object TravelCsvExporter {
 
-    // Formato ISO estándar (garantiza que Excel y VBA lo entiendan siempre igual)
     private val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
 
-    // 🟢 FUNCIÓN PRO: "CSV Hardening"
-    // Limpia cualquier texto que venga del usuario para que sea imposible romper el CSV
     private fun String.sanitizeCsv(): String {
-        return this.replace(";", ",")       // Evita que se creen nuevas columnas
-                   .replace("\n", " ")      // Mata los saltos de línea
-                   .replace("\r", " ")      // Mata los retornos de carro
-                   .replace("\"", "\"\"")   // Escapa comillas dobles
+        return this.replace(";", ",")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace("\"", "\"\"")
     }
 
-    fun writeCsv(
-        outputStream: OutputStream,
-        travels: List<TravelEntity>
-    ) {
-        // 🟢 FORZAR UTF-8: Protege las tildes y las eñes (Málaga, Logroño...)
+    private fun formatDouble(value: Double?): String =
+        value?.let { String.format(Locale.US, "%.2f", it) } ?: ""
+
+    fun writeCsv(outputStream: OutputStream, travels: List<TravelEntity>) {
         outputStream.writer(Charsets.UTF_8).buffered().use { writer ->
 
-            // Cabecera EXACTA e inamovible
             writer.appendLine(
-                "ID;ORIGEN;DESTINO;DESCRIPCION;KM_INICIO;KM_FIN;" +
-                    "HORAS_IMPUTADAS;FACTURACION;DIETA;ESTADO;FECHA_INICIO;FECHA_FIN"
+                "ID;ORIGEN;DESTINO;DESCRIPCION;KM_INICIO;KM_FIN;FACTURACION;DIETA;ESTADO;" +
+                    "HORAS_DRAFT;HORAS_CALC_SNAPSHOT;HORAS_IMPUTADAS;HORAS_MODIFICADAS;DELTA_HORAS;IMPACTO_EURO;" +
+                    "P_COSTE_KM_OPERATIVO_SNAP;P_COSTE_DIETA_FIJA_SNAP;P_PORC_BENEF_EXIGIDO_A_SNAP;P_COSTE_HORA_ALEJANDRO_SNAP;" +
+                    "P_COSTE_HORA_EMPRESA_X_SNAP;P_TARIFA_OBJETIVO_Y_SNAP;" +
+                    "FECHA_INICIO;FECHA_FIN"
             )
 
             travels.forEach { t ->
-                // Formato de 2 decimales y forzando el punto (.)
-                val hoursStr = t.hoursImputed?.let { String.format(Locale.US, "%.2f", it) } ?: ""
-                val billingStr = String.format(Locale.US, "%.2f", t.billingExpected)
-
-                // Aplicamos el sanitizeCsv() a todos los campos de texto libre
                 writer.appendLine(
                     listOf(
                         t.id,
@@ -47,10 +40,24 @@ object TravelCsvExporter {
                         t.description.sanitizeCsv(),
                         t.kmStart,
                         t.kmEnd ?: "",
-                        hoursStr,
-                        billingStr,
+                        formatDouble(t.billingExpected),
                         if (t.hasDiet) "SI" else "NO",
                         t.status.name.sanitizeCsv(),
+                        formatDouble(t.hoursDraft),
+                        formatDouble(t.hoursCalculatedSnapshot),
+                        formatDouble(t.hoursImputed),
+                        if (t.hoursModified) "SI" else "NO",
+                        formatDouble(t.deltaHours),
+                        formatDouble(t.impactEuroAlejandro),
+
+                        // ✅ snapshots
+                        formatDouble(t.snapCosteKmOperativo),
+                        formatDouble(t.snapCosteDietaFija),
+                        formatDouble(t.snapPorcBenefExigidoA),
+                        formatDouble(t.snapCosteHoraAlejandro),
+                        formatDouble(t.snapCosteHoraEmpresaX),
+                        formatDouble(t.snapTarifaObjetivoY),
+
                         formatter.format(Date(t.startTimestamp)),
                         t.endTimestamp?.let { formatter.format(Date(it)) } ?: ""
                     ).joinToString(";")
