@@ -28,5 +28,13 @@ data class TravelEntity(
     val hoursImputed: Double? = null,
     val hoursModified: Boolean = false,
     val deltaHours: Double? = null,
-    val impactEuroAlejandro: Double? = null
+    val impactEuroAlejandro: Double? = null,
+
+    // ✅ NUEVO (PASO 6): Snapshots de parámetros usados (Excel NO recalcula)
+    val snapCosteKmOperativo: Double? = null,        // 0.19
+    val snapCosteDietaFija: Double? = null,          // 12.00
+    val snapPorcBenefExigidoA: Double? = null,       // 0.35
+    val snapCosteHoraAlejandro: Double? = null,      // 26.00
+    val snapCosteHoraEmpresaX: Double? = null,       // 36.65...
+    val snapTarifaObjetivoY: Double? = null          // 42.14...
 )
