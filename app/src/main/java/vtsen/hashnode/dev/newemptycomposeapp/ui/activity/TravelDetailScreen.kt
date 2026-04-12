@@ -48,10 +48,10 @@ fun TravelDetailScreen(
     var kmEnd by rememberSaveable { mutableStateOf("") }
     var hoursDraftText by rememberSaveable { mutableStateOf("") }
 
-    // ✅ Snapshot automático (solo lectura)
+    // Paso 3: snapshot automático (solo lectura)
     var hoursCalculatedText by rememberSaveable { mutableStateOf("") }
 
-    // ✅ Horas imputadas (dato maestro editable)
+    // Dato maestro
     var hoursImputedText by rememberSaveable { mutableStateOf("") }
 
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
@@ -64,17 +64,36 @@ fun TravelDetailScreen(
     }
 
     // =========================================================
-    // PARÁMETROS DEL MODELO A (los 4 que “cuentan” en tu hoja)
-    // Dieta es por viaje => travel!!.hasDiet
+    // PASO 3 — MODELO A (Alejandro) — los 4 que “cuentan”
+    // Dieta por viaje => travel!!.hasDiet
+    // % como MARKUP (alineado con tu Excel)
     // =========================================================
     val COSTE_KM_OPERATIVO = 0.19
     val COSTE_DIETA_FIJA = 12.0
-    val PORC_BENEF_EXIGIDO_A = 0.35        // 35%
-    val COSTE_HORA_ALEJANDRO = 26.0        // €/h
+    val PORC_BENEF_EXIGIDO_A = 0.35
+    val COSTE_HORA_ALEJANDRO = 26.0
+
+    // =========================================================
+    // PASO 4 — MODELO EMPRESA (X/Y) — parámetros de tu tabla
+    // =========================================================
+    val SALARIO_BRUTO_ANUAL = 33000.0
+    val CARGAS_EMPRESA = 0.3065
+    val OVERHEAD_ANUAL = 12000.0
+    val HORAS_ANUALES = 1880.0
+    val UTILIZACION = 0.80
+    val MARGEN_OBJETIVO_EMPRESA = 0.15
+
+    // X (rentable mínimo) y Y (con margen)
+    val costeHoraEmpresaX = remember {
+        val costeEmpresaAnual = (SALARIO_BRUTO_ANUAL * (1.0 + CARGAS_EMPRESA)) + OVERHEAD_ANUAL
+        val horasFacturables = HORAS_ANUALES * UTILIZACION
+        costeEmpresaAnual / horasFacturables
+    }
+    val tarifaObjetivoY = remember { costeHoraEmpresaX * (1.0 + MARGEN_OBJETIVO_EMPRESA) }
 
     val startTimeStr = formatter.format(Date(travel!!.startTimestamp))
 
-    // Inicialización campos al entrar
+    // Inicialización
     LaunchedEffect(travel!!.id) {
         hoursDraftText = travel!!.hoursDraft?.toString() ?: ""
         hoursImputedText = travel!!.hoursImputed?.toString()
@@ -83,9 +102,8 @@ fun TravelDetailScreen(
     }
 
     // =========================================================
-    // CÁLCULO AUTOMÁTICO HORAS SUGERIDAS (alineado con Excel)
-    // Interpretación % como MARKUP (como tu 36,65 -> 42,14 con 15%)
-    // COSTE_MAX_PERMITIDO_A = Facturación / (1 + 0,35)
+    // PASO 3 — CÁLCULO AUTOMÁTICO HORAS SUGERIDAS (snapshot)
+    // Coste max permitido = Facturación / (1 + 0,35)
     // =========================================================
     val kmEndInt = kmEnd.toIntOrNull()
     val kmDone = if (kmEndInt != null) max(0, kmEndInt - travel!!.kmStart) else null
@@ -101,48 +119,41 @@ fun TravelDetailScreen(
 
         val presupuestoHorasEuros = costeMaxPermitidoA - costeKm - costeDieta
         val horasRaw = presupuestoHorasEuros / COSTE_HORA_ALEJANDRO
-
         val horasClamped = max(0.0, horasRaw)
 
-        // ✅ Redondeo al decimal más cercano (0,1 h)
         round(horasClamped * 10.0) / 10.0
     }
 
-    // Refrescar snapshot en UI
     LaunchedEffect(suggestedHours) {
         if (suggestedHours != null) {
             hoursCalculatedText = String.format(Locale.US, "%.1f", suggestedHours)
         }
     }
 
-    // Semáforo (modelo vs imputadas)
+    // Semáforo modelo A (imputadas vs sugeridas)
     val imputedValue = hoursImputedText.replace(',', '.').toDoubleOrNull()
     val calculatedValue = hoursCalculatedText.replace(',', '.').toDoubleOrNull()
 
-    val isCompliant: Boolean? = remember(imputedValue, calculatedValue) {
+    val semaforoA: Boolean? = remember(imputedValue, calculatedValue) {
         if (imputedValue == null || calculatedValue == null) null
         else imputedValue <= calculatedValue + 1e-9
     }
 
-    // Breakdown para mostrar (modelo hiperrealista A)
-    val modelDetails = remember(kmDone, suggestedHours) {
-        if (kmDone == null || suggestedHours == null) null else {
-            val facturacion = travel!!.billingExpected
-            val costeMaxPermitidoA = facturacion / (1.0 + PORC_BENEF_EXIGIDO_A)
+    // =========================================================
+    // PASO 4 — TARIFA EFECTIVA y SEMÁFORO EMPRESA (X/Y)
+    // tarifa_efectiva = facturación / horas_imputadas
+    // =========================================================
+    val tarifaEfectiva = remember(imputedValue, travel!!.billingExpected) {
+        if (imputedValue == null || imputedValue <= 0.0) null
+        else travel!!.billingExpected / imputedValue
+    }
 
-            val costeKm = kmDone * COSTE_KM_OPERATIVO
-            val costeDieta = if (travel!!.hasDiet) COSTE_DIETA_FIJA else 0.0
-            val presupuestoHorasEuros = costeMaxPermitidoA - costeKm - costeDieta
+    val semaforoEmpresaX: Boolean? = remember(tarifaEfectiva) {
+        if (tarifaEfectiva == null) null else tarifaEfectiva >= costeHoraEmpresaX
+    }
 
-            ModelBreakdown(
-                kmDone = kmDone,
-                costeKm = costeKm,
-                costeDieta = costeDieta,
-                costeMaxPermitidoA = costeMaxPermitidoA,
-                presupuestoHorasEuros = presupuestoHorasEuros,
-                horasSugeridas = suggestedHours
-            )
-        }
+    val semaforoEmpresaY: Boolean? = remember(tarifaEfectiva) {
+        if (tarifaEfectiva == null) null else tarifaEfectiva >= tarifaObjetivoY
     }
 
     Scaffold(
@@ -167,7 +178,8 @@ fun TravelDetailScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // IZQUIERDA 40%: Contexto
+
+                // IZQUIERDA 40% — Contexto
                 Card(
                     modifier = Modifier.weight(0.4f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -193,13 +205,13 @@ fun TravelDetailScreen(
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Text(
-                            "🍽️ Dieta: ${if (travel!!.hasDiet) "SI (${String.format(Locale.getDefault(), "%.2f", COSTE_DIETA_FIJA)} €)" else "NO"}",
+                            "🍽️ Dieta: ${if (travel!!.hasDiet) "SI (12,00 €)" else "NO"}",
                             style = MaterialTheme.typography.bodyLarge
                         )
                     }
                 }
 
-                // DERECHA 60%: Draft + Modelo + Cierre
+                // DERECHA 60% — Draft + Modelos + Cierre
                 Card(
                     modifier = Modifier.weight(0.6f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -210,7 +222,7 @@ fun TravelDetailScreen(
                     ) {
                         Text("Imputación y Cierre", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-                        // FASE 1: Draft (punto intermedio)
+                        // Draft
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -229,9 +241,7 @@ fun TravelDetailScreen(
                                     val ok = viewModel.updateHoursDraft(draft)
                                     errorMessage = if (ok) null else "Horas provisionales inválidas."
                                 }
-                            ) {
-                                Text("Guardar Draft")
-                            }
+                            ) { Text("Guardar Draft") }
                         }
 
                         Divider(modifier = Modifier.padding(vertical = 8.dp))
@@ -244,18 +254,18 @@ fun TravelDetailScreen(
                             label = { Text("Kilómetros de Llegada") },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            supportingText = { Text("Al escribir KM fin, se calcula el modelo automáticamente.") }
+                            supportingText = { Text("Al escribir KM fin, se calculan los modelos automáticamente.") }
                         )
 
-                        // ✅ Snapshot automático y solo lectura
+                        // Snapshot (solo lectura)
                         OutlinedTextField(
                             value = hoursCalculatedText,
                             onValueChange = { },
                             readOnly = true,
-                            label = { Text("Horas sugeridas (modelo) — snapshot") },
+                            label = { Text("Horas sugeridas (Modelo A) — snapshot") },
                             modifier = Modifier.fillMaxWidth(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            supportingText = { Text("Redondeo 0,1 h. Se guarda en Room. Excel NO recalcula.") }
+                            supportingText = { Text("Redondeo 0,1h. Se guarda en Room. Excel NO recalcula.") }
                         )
 
                         OutlinedTextField(
@@ -263,36 +273,43 @@ fun TravelDetailScreen(
                             onValueChange = { hoursImputedText = it },
                             label = { Text("Horas imputadas (definitivas)") },
                             modifier = Modifier.fillMaxWidth(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            supportingText = { Text("Tú decides el valor final.") }
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                         )
 
-                        // Bloque de modelo A
-                        modelDetails?.let { m ->
-                            Divider(modifier = Modifier.padding(vertical = 8.dp))
-                            Text("Modelo A (Alejandro)", fontWeight = FontWeight.Bold)
-
-                            Text("COSTE_KM_OPERATIVO: 0,19 €/km")
-                            Text("COSTE_DIETA_FIJA: 12,00 €")
-                            Text("PORC_BENEF_EXIGIDO_A: 35%")
-                            Text("COSTE_HORA_ALEJANDRO: 26,00 €/h")
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text("KM realizados: ${m.kmDone} km")
-                            Text("Coste KM: ${String.format(Locale.getDefault(), "%.2f", m.costeKm)} €")
-                            Text("Coste dieta: ${String.format(Locale.getDefault(), "%.2f", m.costeDieta)} €")
-                            Text("Coste máx permitido (A): ${String.format(Locale.getDefault(), "%.2f", m.costeMaxPermitidoA)} €")
-                            Text("Presupuesto horas (€): ${String.format(Locale.getDefault(), "%.2f", m.presupuestoHorasEuros)} €")
-                            Text("Horas sugeridas (0,1h): ${String.format(Locale.getDefault(), "%.1f", m.horasSugeridas)} h")
-
-                            Spacer(modifier = Modifier.height(6.dp))
-                            val semaforoText = when (isCompliant) {
-                                true -> "🟢 Cumple el modelo (imputadas ≤ sugeridas)"
-                                false -> "🔴 NO cumple (imputadas > sugeridas)"
-                                null -> "— Introduce horas imputadas para comparar"
-                            }
-                            Text(semaforoText, fontWeight = FontWeight.SemiBold)
+                        // Semáforo Modelo A
+                        val txtA = when (semaforoA) {
+                            true -> "🟢 Modelo A OK (imputadas ≤ sugeridas)"
+                            false -> "🔴 Modelo A NO (imputadas > sugeridas)"
+                            null -> "— Introduce KM fin y horas imputadas"
                         }
+                        Text(txtA, fontWeight = FontWeight.SemiBold)
+
+                        Divider(modifier = Modifier.padding(vertical = 8.dp))
+
+                        // PASO 4 — MODELO EMPRESA
+                        Text("Modelo Empresa (X/Y)", fontWeight = FontWeight.Bold)
+
+                        Text("X (rentable mínimo): ${String.format(Locale.getDefault(), "%.2f", costeHoraEmpresaX)} €/h")
+                        Text("Y (con margen 15%): ${String.format(Locale.getDefault(), "%.2f", tarifaObjetivoY)} €/h")
+
+                        val tarifaTxt = tarifaEfectiva?.let { String.format(Locale.getDefault(), "%.2f", it) } ?: "—"
+                        Text("Tarifa efectiva (F/h): $tarifaTxt €/h", fontWeight = FontWeight.SemiBold)
+
+                        val txtX = when (semaforoEmpresaX) {
+                            true -> "🟢 Cumple X (rentable mínimo)"
+                            false -> "🔴 No cumple X"
+                            null -> "— Introduce horas imputadas"
+                        }
+                        Text(txtX, fontWeight = FontWeight.SemiBold)
+
+                        val txtY = when (semaforoEmpresaY) {
+                            true -> "🟢 Cumple Y (objetivo con margen)"
+                            false -> "🟡 No llega a Y (info secundaria)"
+                            null -> "—"
+                        }
+                        Text(txtY)
+
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         errorMessage?.let {
                             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -305,7 +322,7 @@ fun TravelDetailScreen(
                                 val imputed = hoursImputedText.replace(',', '.').toDoubleOrNull() ?: -1.0
 
                                 if (calculated <= 0.0) {
-                                    errorMessage = "Introduce KM fin para calcular horas sugeridas."
+                                    errorMessage = "Introduce KM fin para calcular el snapshot."
                                     return@Button
                                 }
 
@@ -334,12 +351,3 @@ fun TravelDetailScreen(
         }
     }
 }
-
-private data class ModelBreakdown(
-    val kmDone: Int,
-    val costeKm: Double,
-    val costeDieta: Double,
-    val costeMaxPermitidoA: Double,
-    val presupuestoHorasEuros: Double,
-    val horasSugeridas: Double
-)
