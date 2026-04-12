@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -46,7 +48,6 @@ fun SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    // Inputs (rememberSaveable para rotación)
     var costeKm by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var dietaFija by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var benefA by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
@@ -59,7 +60,6 @@ fun SettingsScreen(
     var utilizacion by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     var margenEmp by rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
 
-    // Cargar valores actuales
     LaunchedEffect(settings) {
         costeKm = settings.costeKmOperativo.toString()
         dietaFija = settings.costeDietaFija.toString()
@@ -97,14 +97,8 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.fillMaxWidth()) {
 
-                // =========================
-                // Card Modelo A (Alejandro)
-                // =========================
                 Card(
                     modifier = Modifier.weight(1f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -149,9 +143,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // =========================
-                // Card Modelo Empresa
-                // =========================
                 Card(
                     modifier = Modifier.weight(1f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -218,13 +209,11 @@ fun SettingsScreen(
             Button(
                 onClick = {
                     val newSettings = AxisSettings(
-                        // Modelo A
                         costeKmOperativo = toDouble(costeKm) ?: settings.costeKmOperativo,
                         costeDietaFija = toDouble(dietaFija) ?: settings.costeDietaFija,
                         porcBenefExigidoA = toDouble(benefA) ?: settings.porcBenefExigidoA,
                         costeHoraAlejandro = toDouble(costeHoraA) ?: settings.costeHoraAlejandro,
 
-                        // Empresa
                         salarioBrutoAnual = toDouble(salario) ?: settings.salarioBrutoAnual,
                         cargasEmpresa = toDouble(cargas) ?: settings.cargasEmpresa,
                         overheadAnual = toDouble(overhead) ?: settings.overheadAnual,
@@ -235,7 +224,6 @@ fun SettingsScreen(
 
                     viewModel.saveAll(newSettings)
 
-                    // ✅ showSnackbar() es suspend -> corrutina
                     scope.launch {
                         snackbarHostState.showSnackbar("✅ Ajustes guardados")
                     }
@@ -254,3 +242,4 @@ fun SettingsScreen(
         }
     }
 }
+
