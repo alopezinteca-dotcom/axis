@@ -65,6 +65,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
 
     // Material Components
     implementation("com.google.android.material:material:1.13.0")
