@@ -21,11 +21,10 @@ interface TravelDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTravel(travel: TravelEntity)
 
-    // Guardar horas provisionales (draft)
     @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
     suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
 
-    // Cierre definitivo: snapshots + flags + kmEnd + estado
+    // ✅ Cierre definitivo (ahora incluye snapshots de parámetros)
     @Query(
         """
         UPDATE travels
@@ -37,7 +36,13 @@ interface TravelDao {
             hoursImputed = :hoursImputed,
             hoursModified = :hoursModified,
             deltaHours = :deltaHours,
-            impactEuroAlejandro = :impactEuroAlejandro
+            impactEuroAlejandro = :impactEuroAlejandro,
+            snapCosteKmOperativo = :snapCosteKmOperativo,
+            snapCosteDietaFija = :snapCosteDietaFija,
+            snapPorcBenefExigidoA = :snapPorcBenefExigidoA,
+            snapCosteHoraAlejandro = :snapCosteHoraAlejandro,
+            snapCosteHoraEmpresaX = :snapCosteHoraEmpresaX,
+            snapTarifaObjetivoY = :snapTarifaObjetivoY
         WHERE id = :id
         """
     )
@@ -50,6 +55,12 @@ interface TravelDao {
         hoursImputed: Double,
         hoursModified: Boolean,
         deltaHours: Double,
-        impactEuroAlejandro: Double
+        impactEuroAlejandro: Double,
+        snapCosteKmOperativo: Double,
+        snapCosteDietaFija: Double,
+        snapPorcBenefExigidoA: Double,
+        snapCosteHoraAlejandro: Double,
+        snapCosteHoraEmpresaX: Double,
+        snapTarifaObjetivoY: Double
     )
 }
