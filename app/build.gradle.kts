@@ -34,7 +34,7 @@ android {
         kotlinCompilerExtensionVersion = "1.5.14"
     }
 
-    // ✅ CLAVE: Java compile target = 17 (esto arregla el 1.8 vs 17)
+    // ✅ CLAVE: Java compile target = 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -46,7 +46,7 @@ android {
     }
 }
 
-// ✅ Toolchain Kotlin (opcional, pero muy recomendable en CI)
+// ✅ Toolchain Kotlin
 kotlin {
     jvmToolchain(17)
 }
@@ -66,7 +66,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.4")
 
-    // Material Components (para temas XML Theme.Material3.*)
+    // Material Components
     implementation("com.google.android.material:material:1.13.0")
 
     // SplashScreen compat
@@ -79,4 +79,8 @@ dependencies {
 
     // -------- Coroutines --------
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // 🟢 NUEVO: Localización y Corrutinas para Play Services (GPS)
+    implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 }
