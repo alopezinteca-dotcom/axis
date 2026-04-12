@@ -94,7 +94,7 @@ class ActivityViewModel(
         val modified = abs(delta) > 0.01
 
         // Placeholder hasta Settings (DataStore)
-        val costeHoraAlejandro = 25.0
+        val costeHoraAlejandro = 26.0
         val impact = delta * costeHoraAlejandro
 
         viewModelScope.launch {
