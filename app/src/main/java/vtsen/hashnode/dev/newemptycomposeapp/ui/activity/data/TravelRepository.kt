@@ -20,7 +20,15 @@ class TravelRepository(private val travelDao: TravelDao) {
         travelDao.updateTravel(travel)
     }
 
+    suspend fun updateHoursDraft(id: String, hoursDraft: Double?) {
+        travelDao.updateHoursDraft(id, hoursDraft)
+    }
+
     suspend fun deleteTravel(travel: TravelEntity) {
         travelDao.deleteTravel(travel)
+    }
+
+    suspend fun deleteAllTravels() {
+        travelDao.deleteAllTravels()
     }
 }
