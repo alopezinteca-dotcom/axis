@@ -74,9 +74,6 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementD
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
 
-/**
- * DatePicker / DatePickerDialog son experimentales en Material3, por eso el OptIn. [1](https://www.scoro.com/blog/billable-utilization/)
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityHomeScreen(
@@ -150,7 +147,6 @@ fun ActivityHomeScreen(
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Diálogo gestión calendario (📅)
     var showCalendarManager by remember { mutableStateOf(false) }
 
     // Dialogs añadir festivo/vacaciones
@@ -263,7 +259,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // UI: Diálogo “Gestión calendario” (📅)
+    // UI: Diálogo “Gestión calendario”
     // =========================
     if (showCalendarManager) {
         CalendarManagementDialog(
@@ -284,7 +280,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // UI: Scaffold con TopAppBar + 📅
+    // Scaffold con TopAppBar + 📅
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -309,7 +305,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers periodo
+        // Pickers desde/hasta
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -425,10 +421,7 @@ fun ActivityHomeScreen(
         ) {
             // IZQUIERDA KPIs
             Column(
-                modifier = Modifier
-                    .weight(0.35f)
-                    .fillMaxHeight()
-                    .verticalScroll(rememberScrollState()),
+                modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -455,12 +448,9 @@ fun ActivityHomeScreen(
                                 },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Este mes") }
-
                             Button(
                                 onClick = {
-                                    coroutineScope.launch {
-                                        BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second)
-                                    }
+                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) }
                                 },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Reset") }
@@ -556,7 +546,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   Helpers
+   Helpers (KPI + export)
    ========================= */
 
 @Composable
