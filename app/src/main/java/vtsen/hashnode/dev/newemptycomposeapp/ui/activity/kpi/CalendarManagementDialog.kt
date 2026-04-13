@@ -36,9 +36,7 @@ fun CalendarManagementDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Cerrar") }
-        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar") } },
         title = { Text("Gestión de Calendario", fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -129,4 +127,3 @@ fun CalendarManagementDialog(
         }
     )
 }
-``
