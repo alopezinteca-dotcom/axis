@@ -41,7 +41,7 @@ fun CalendarManagementDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
-                // ===== FESTIVOS =====
+                // FESTIVOS
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -84,7 +84,7 @@ fun CalendarManagementDialog(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // ===== VACACIONES =====
+                // VACACIONES
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
