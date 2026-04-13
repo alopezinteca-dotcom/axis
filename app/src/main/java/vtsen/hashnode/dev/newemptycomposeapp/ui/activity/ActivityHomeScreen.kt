@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -36,6 +37,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -67,6 +70,7 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportUtils
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.TravelCsvExporter
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
@@ -85,7 +89,6 @@ fun ActivityHomeScreen(
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
-    val dowFormatter = remember { DateTimeFormatter.ofPattern("EEE", Locale("es", "ES")) }
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -143,10 +146,29 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 2) Festivos + vacaciones (manual)
+    // 2) Festivos + Vacaciones (manual)
     // =========================
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // Dialog gestión calendario (📅)
+    var showCalendarManager by remember { mutableStateOf(false) }
+
+    // Dialogs añadir festivo/vacaciones (ya los tienes, los reutilizamos)
+    var showAddHoliday by remember { mutableStateOf(false) }
+    var showAddVacation by remember { mutableStateOf(false) }
+    var holidayDesc by remember { mutableStateOf("") }
+    var vacationDesc by remember { mutableStateOf("") }
+
+    val holidayPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacFromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacToPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
 
     // =========================
     // 3) VIAJES FILTRADOS POR PERIODO
@@ -159,7 +181,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 4) KPIs (mantenemos los tuyos)
+    // 4) KPI REAL PERIODO
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
 
@@ -210,11 +232,7 @@ fun ActivityHomeScreen(
     val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
 
     val pendienteFacturar by remember(allTravels) {
-        derivedStateOf {
-            allTravels
-                .filter { !it.isInvoiced }
-                .sumOf { it.billingExpected }
-        }
+        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
 
     // =========================
@@ -246,47 +264,44 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 6) Dialogs añadir Festivo / Vacaciones
+    // UI: Diálogo “Gestión calendario” (📅)
     // =========================
-    var showAddHoliday by remember { mutableStateOf(false) }
-    var showAddVacation by remember { mutableStateOf(false) }
-    var holidayDesc by remember { mutableStateOf("") }
-    var vacationDesc by remember { mutableStateOf("") }
-
-    val holidayPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-    val vacFromPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-    val vacToPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-
-    // =========================
-    // 7) Construimos la TIMELINE por DÍAS (ordenada)
-    // =========================
-    val daySections by remember(
-        fromDate, toDate, periodTravels, currentTravel, allHolidays, allVacations, zone
-    ) {
-        derivedStateOf {
-            buildDaySections(
-                fromDate = fromDate,
-                toDate = toDate,
-                periodTravels = periodTravels,
-                currentTravel = currentTravel,
-                holidays = allHolidays,
-                vacations = allVacations,
-                zone = zone
-            )
-        }
+    if (showCalendarManager) {
+        CalendarManagementDialog(
+            holidays = allHolidays,
+            vacations = allVacations,
+            onAddHoliday = { showAddHoliday = true },
+            onAddVacation = { showAddVacation = true },
+            onDeleteHoliday = { h ->
+                val raw = CalendarOverridesStore.toRawHoliday(h)
+                coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
+            },
+            onDeleteVacation = { v ->
+                val raw = CalendarOverridesStore.toRawVacation(v)
+                coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
+            },
+            onDismiss = { showCalendarManager = false }
+        )
     }
 
     // =========================
-    // UI
+    // UI: Pickers periodo + Añadir festivo/vacaciones
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("AXIS · Activity") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                actions = {
+                    TextButton(onClick = { showCalendarManager = true }) {
+                        Text("📅", fontSize = MaterialTheme.typography.titleLarge.fontSize)
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = onNewTravelClick,
@@ -295,7 +310,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers periodo
+        // Pickers desde/hasta
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -401,7 +416,7 @@ fun ActivityHomeScreen(
             }
         }
 
-        // Layout principal
+        // Layout principal (paneles)
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -409,8 +424,7 @@ fun ActivityHomeScreen(
                 .padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
-            // PANEL IZQUIERDO
+            // IZQUIERDA (KPIs)
             Column(
                 modifier = Modifier
                     .weight(0.35f)
@@ -451,11 +465,6 @@ fun ActivityHomeScreen(
                                 },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Reset") }
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = { showAddHoliday = true }, modifier = Modifier.weight(1f)) { Text("+ Festivo") }
-                            Button(onClick = { showAddVacation = true }, modifier = Modifier.weight(1f)) { Text("+ Vacaciones") }
                         }
                     }
                 }
@@ -502,71 +511,44 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // PANEL DERECHO (TIMELINE POR DÍA)
+            // DERECHA (listado simple del periodo, como venías haciendo)
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Viajes del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    daySections.forEach { day ->
+                    val showCurrent = currentTravel?.startTimestamp?.let { it in fromMillis..toMillis } == true
+                    if (showCurrent) {
                         item {
-                            DayHeader(
-                                date = day.date,
-                                dateFormatter = dateFormatter,
-                                dowFormatter = dowFormatter
-                            )
-                        }
-
-                        if (day.items.isEmpty()) {
-                            item { EmptyDayRow() }
-                        } else {
-                            day.items.forEach { item ->
-                                when (item) {
-                                    is DayItem.HolidayItem -> {
-                                        item {
-                                            HolidayRow(
-                                                h = item.holiday,
-                                                onDelete = {
-                                                    val raw = CalendarOverridesStore.toRawHoliday(item.holiday)
-                                                    coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
-                                                }
-                                            )
-                                        }
-                                    }
-                                    is DayItem.VacationItem -> {
-                                        item {
-                                            VacationRow(
-                                                v = item.vacation,
-                                                onDelete = {
-                                                    val raw = CalendarOverridesStore.toRawVacation(item.vacation)
-                                                    coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
-                                                }
-                                            )
-                                        }
-                                    }
-                                    is DayItem.TravelItem -> {
-                                        item {
-                                            if (item.travel.status == TravelStatus.IN_PROGRESS) {
-                                                InProgressRow(item.travel, onCurrentTravelClick)
-                                            } else {
-                                                TravelRowCard(
-                                                    travel = item.travel,
-                                                    zone = zone,
-                                                    dateFormatter = dateFormatter,
-                                                    onToggleInvoiced = { checked -> viewModel.setFacturado(item.travel.id, checked) },
-                                                    onClick = { onEditTravelClick(item.travel.id) }
-                                                )
-                                            }
-                                        }
-                                    }
+                            val t = currentTravel!!
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                modifier = Modifier.fillMaxWidth().clickable { onCurrentTravelClick() }
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${t.origin} → ${t.destination}", style = MaterialTheme.typography.titleMedium)
+                                    Text("KM inicio: ${t.kmStart} | Draft: ${t.hoursDraft ?: 0.0}h")
                                 }
                             }
                         }
+                    }
+
+                    val closed = periodTravels.filter { it.status == TravelStatus.CLOSED }
+                    items(closed) { t ->
+                        TravelRowCard(
+                            travel = t,
+                            zone = zone,
+                            dateFormatter = dateFormatter,
+                            onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
+                            onClick = { onEditTravelClick(t.id) }
+                        )
                     }
                 }
             }
@@ -575,71 +557,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   Timeline model
-   ========================= */
-
-private data class DaySection(
-    val date: LocalDate,
-    val items: List<DayItem>
-)
-
-private sealed class DayItem {
-    data class HolidayItem(val holiday: Holiday) : DayItem()
-    data class VacationItem(val vacation: Vacation) : DayItem()
-    data class TravelItem(val travel: TravelEntity) : DayItem()
-}
-
-private fun buildDaySections(
-    fromDate: LocalDate,
-    toDate: LocalDate,
-    periodTravels: List<TravelEntity>,
-    currentTravel: TravelEntity?,
-    holidays: List<Holiday>,
-    vacations: List<Vacation>,
-    zone: ZoneId
-): List<DaySection> {
-    val days = datesBetweenInclusive(fromDate, toDate)
-
-    val travelsByDay = periodTravels.groupBy { BillingPeriodStore.millisToLocalDate(it.startTimestamp, zone) }
-    val holidaysByDay = holidays.groupBy { it.date }
-
-    return days.map { day ->
-        val items = mutableListOf<DayItem>()
-
-        holidaysByDay[day]?.forEach { items.add(DayItem.HolidayItem(it)) }
-
-        vacations.filter { day in it.from..it.to }
-            .forEach { items.add(DayItem.VacationItem(it)) }
-
-        travelsByDay[day]?.forEach { items.add(DayItem.TravelItem(it)) }
-
-        // Si el currentTravel existe y cae este día, lo metemos aunque no esté en allTravels aún (por seguridad)
-        if (currentTravel != null) {
-            val d = BillingPeriodStore.millisToLocalDate(currentTravel.startTimestamp, zone)
-            if (d == day && currentTravel.status == TravelStatus.IN_PROGRESS) {
-                if (items.none { it is DayItem.TravelItem && it.travel.id == currentTravel.id }) {
-                    items.add(DayItem.TravelItem(currentTravel))
-                }
-            }
-        }
-
-        DaySection(day, items)
-    }
-}
-
-private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
-    if (to.isBefore(from)) return emptyList()
-    val out = ArrayList<LocalDate>()
-    var d = from
-    while (!d.isAfter(to)) {
-        out.add(d)
-        d = d.plusDays(1)
-    }
-    return out
-}
-
-/* =========================
-   UI helpers
+   UI helpers + export + KPI helpers
    ========================= */
 
 @Composable
@@ -665,99 +583,6 @@ private fun KpiLine(title: String, value: String, subtitle: String) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun DayHeader(
-    date: LocalDate,
-    dateFormatter: DateTimeFormatter,
-    dowFormatter: DateTimeFormatter
-) {
-    val dow = date.format(dowFormatter).replaceFirstChar { it.uppercase() }
-    val dmy = date.format(dateFormatter)
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            Modifier.padding(10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("$dmy · $dow", fontWeight = FontWeight.Bold)
-            Text("Día ${date.dayOfMonth}", fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun EmptyDayRow() {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Sin viajes (0 km / 0 €)", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-@Composable
-private fun HolidayRow(h: Holiday, onDelete: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("🔴 FESTIVO", fontWeight = FontWeight.Bold)
-                Text(h.description.ifBlank { "—" }, color = MaterialTheme.colorScheme.onErrorContainer)
-            }
-            TextButton(onClick = onDelete) { Text("Eliminar") }
-        }
-    }
-}
-
-@Composable
-private fun VacationRow(v: Vacation, onDelete: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            Modifier.padding(12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text("🟡 VACACIONES", fontWeight = FontWeight.Bold)
-                Text("${v.from} → ${v.to}", color = MaterialTheme.colorScheme.onTertiaryContainer)
-                if (v.description.isNotBlank()) {
-                    Text(v.description, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                }
-            }
-            TextButton(onClick = onDelete) { Text("Eliminar") }
-        }
-    }
-}
-
-@Composable
-private fun InProgressRow(travel: TravelEntity, onClick: () -> Unit) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-        modifier = Modifier.fillMaxWidth().clickable { onClick() }
-    ) {
-        Column(Modifier.padding(16.dp)) {
-            Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("${travel.origin} → ${travel.destination}", style = MaterialTheme.typography.titleMedium)
-            Text("KM inicio: ${travel.kmStart} | Draft: ${travel.hoursDraft ?: 0.0}h")
         }
     }
 }
@@ -807,10 +632,6 @@ private fun TravelRowCard(
     }
 }
 
-/* =========================
-   Export IO
-   ========================= */
-
 private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEntity>) {
     val resolver = context.contentResolver
     val fileName = ExportUtils.currentMonthFileName()
@@ -838,10 +659,6 @@ private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEn
         TravelCsvExporter.writeCsv(stream, travels)
     } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento")
 }
-
-/* =========================
-   Date helpers / KPI helpers
-   ========================= */
 
 private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
     val now = LocalDate.now()
