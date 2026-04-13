@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -50,7 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.DayOfWeek
@@ -73,6 +71,9 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesSt
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
 
+/**
+ * DatePicker / DatePickerDialog son experimentales en Material3, por eso el OptIn. [1](https://www.scoro.com/blog/billable-utilization/)
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityHomeScreen(
@@ -84,6 +85,7 @@ fun ActivityHomeScreen(
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
+    val dowFormatter = remember { DateTimeFormatter.ofPattern("EEE", Locale("es", "ES")) }
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -146,24 +148,8 @@ fun ActivityHomeScreen(
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
 
-    val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
-        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
-    }
-    val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
-        derivedStateOf {
-            allVacations.filter { rangesOverlap(it.from, it.to, fromDate, toDate) }
-        }
-    }
-
-    val holidayDatesInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
-    }
-    val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
-        derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
-    }
-
     // =========================
-    // 3) VIAJES FILTRADOS POR PERIODO (LISTADO DERECHA)
+    // 3) VIAJES FILTRADOS POR PERIODO
     // =========================
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
         derivedStateOf {
@@ -173,7 +159,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 4) KPI REAL PERIODO
+    // 4) KPIs (mantenemos los tuyos)
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
 
@@ -193,9 +179,13 @@ fun ActivityHomeScreen(
         }
     }
 
-    // =========================
-    // 5) KPI TEÓRICO (REAL ya con festivos+vacaciones)
-    // =========================
+    val holidayDatesInPeriod by remember(allHolidays, fromDate, toDate) {
+        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate }.map { it.date }.toSet() }
+    }
+    val vacationDatesInPeriod by remember(allVacations, fromDate, toDate) {
+        derivedStateOf { expandVacationDates(allVacations, fromDate, toDate) }
+    }
+
     val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
         derivedStateOf {
             countWeekdaysInclusive(fromDate, toDate) -
@@ -204,33 +194,31 @@ fun ActivityHomeScreen(
         }
     }
     val diasLaborables = if (diasLaborablesReales < 0) 0 else diasLaborablesReales
-
     val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
     val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
 
-    // =========================
-    // 6) KPI ANUAL + PENDIENTE
-    // =========================
     val yearStartMillis = remember {
         BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
     }
     val nowEndMillis = remember {
         BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
     }
-
     val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
-
     val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
 
     val pendienteFacturar by remember(allTravels) {
-        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
+        derivedStateOf {
+            allTravels
+                .filter { !it.isInvoiced }
+                .sumOf { it.billingExpected }
+        }
     }
 
     // =========================
-    // 7) Export CSV (se mantiene)
+    // 5) Export CSV
     // =========================
     fun triggerExport(folderUri: Uri) {
         if (isExporting) return
@@ -258,7 +246,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 8) Dialogs añadir Festivo / Vacaciones
+    // 6) Dialogs añadir Festivo / Vacaciones
     // =========================
     var showAddHoliday by remember { mutableStateOf(false) }
     var showAddVacation by remember { mutableStateOf(false) }
@@ -275,6 +263,28 @@ fun ActivityHomeScreen(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
     )
 
+    // =========================
+    // 7) Construimos la TIMELINE por DÍAS (ordenada)
+    // =========================
+    val daySections by remember(
+        fromDate, toDate, periodTravels, currentTravel, allHolidays, allVacations, zone
+    ) {
+        derivedStateOf {
+            buildDaySections(
+                fromDate = fromDate,
+                toDate = toDate,
+                periodTravels = periodTravels,
+                currentTravel = currentTravel,
+                holidays = allHolidays,
+                vacations = allVacations,
+                zone = zone
+            )
+        }
+    }
+
+    // =========================
+    // UI
+    // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
@@ -285,7 +295,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // DatePicker Desde
+        // Pickers periodo
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -304,7 +314,6 @@ fun ActivityHomeScreen(
             ) { DatePicker(state = fromPickerState) }
         }
 
-        // DatePicker Hasta
         if (showToPicker) {
             DatePickerDialog(
                 onDismissRequest = { showToPicker = false },
@@ -323,7 +332,7 @@ fun ActivityHomeScreen(
             ) { DatePicker(state = toPickerState) }
         }
 
-        // Añadir Festivo
+        // Añadir festivo
         if (showAddHoliday) {
             DatePickerDialog(
                 onDismissRequest = { showAddHoliday = false },
@@ -355,7 +364,7 @@ fun ActivityHomeScreen(
             }
         }
 
-        // Añadir Vacaciones (dos date pickers + desc)
+        // Añadir vacaciones
         if (showAddVacation) {
             DatePickerDialog(
                 onDismissRequest = { showAddVacation = false },
@@ -386,8 +395,7 @@ fun ActivityHomeScreen(
                         value = vacationDesc,
                         onValueChange = { vacationDesc = it },
                         label = { Text("Descripción (vacaciones)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Text)
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -401,6 +409,7 @@ fun ActivityHomeScreen(
                 .padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
             // PANEL IZQUIERDO
             Column(
                 modifier = Modifier
@@ -493,79 +502,140 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // PANEL DERECHO
+            // PANEL DERECHO (TIMELINE POR DÍA)
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text("Viajes del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // Mostrar FESTIVOS en rojo (dentro del listado)
-                    if (holidaysInPeriod.isNotEmpty()) {
-                        items(holidaysInPeriod) { h ->
-                            HolidayRow(
-                                h = h,
-                                onDelete = {
-                                    val raw = CalendarOverridesStore.toRawHoliday(h)
-                                    coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
-                                }
-                            )
-                        }
-                    }
-
-                    // Mostrar VACACIONES (en color distinto)
-                    if (vacationsInPeriod.isNotEmpty()) {
-                        items(vacationsInPeriod) { v ->
-                            VacationRow(
-                                v = v,
-                                onDelete = {
-                                    val raw = CalendarOverridesStore.toRawVacation(v)
-                                    coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
-                                }
-                            )
-                        }
-                    }
-
-                    // EN CURSO solo si cae dentro del periodo
-                    val showCurrent = currentTravel?.startTimestamp?.let { it in fromMillis..toMillis } == true
-                    if (showCurrent) {
+                    daySections.forEach { day ->
                         item {
-                            val t = currentTravel!!
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onCurrentTravelClick() }
-                            ) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("${t.origin} → ${t.destination}", style = MaterialTheme.typography.titleMedium)
-                                    Text("KM inicio: ${t.kmStart} | Draft: ${t.hoursDraft ?: 0.0}h")
+                            DayHeader(
+                                date = day.date,
+                                dateFormatter = dateFormatter,
+                                dowFormatter = dowFormatter
+                            )
+                        }
+
+                        if (day.items.isEmpty()) {
+                            item { EmptyDayRow() }
+                        } else {
+                            day.items.forEach { item ->
+                                when (item) {
+                                    is DayItem.HolidayItem -> {
+                                        item {
+                                            HolidayRow(
+                                                h = item.holiday,
+                                                onDelete = {
+                                                    val raw = CalendarOverridesStore.toRawHoliday(item.holiday)
+                                                    coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
+                                                }
+                                            )
+                                        }
+                                    }
+                                    is DayItem.VacationItem -> {
+                                        item {
+                                            VacationRow(
+                                                v = item.vacation,
+                                                onDelete = {
+                                                    val raw = CalendarOverridesStore.toRawVacation(item.vacation)
+                                                    coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
+                                                }
+                                            )
+                                        }
+                                    }
+                                    is DayItem.TravelItem -> {
+                                        item {
+                                            if (item.travel.status == TravelStatus.IN_PROGRESS) {
+                                                InProgressRow(item.travel, onCurrentTravelClick)
+                                            } else {
+                                                TravelRowCard(
+                                                    travel = item.travel,
+                                                    zone = zone,
+                                                    dateFormatter = dateFormatter,
+                                                    onToggleInvoiced = { checked -> viewModel.setFacturado(item.travel.id, checked) },
+                                                    onClick = { onEditTravelClick(item.travel.id) }
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    // Viajes cerrados del periodo (con checkbox facturado)
-                    val closed = periodTravels.filter { it.status == TravelStatus.CLOSED }
-                    items(closed) { t ->
-                        TravelRowCard(
-                            travel = t,
-                            zone = zone,
-                            dateFormatter = dateFormatter,
-                            onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
-                            onClick = { onEditTravelClick(t.id) }
-                        )
                     }
                 }
             }
         }
     }
+}
+
+/* =========================
+   Timeline model
+   ========================= */
+
+private data class DaySection(
+    val date: LocalDate,
+    val items: List<DayItem>
+)
+
+private sealed class DayItem {
+    data class HolidayItem(val holiday: Holiday) : DayItem()
+    data class VacationItem(val vacation: Vacation) : DayItem()
+    data class TravelItem(val travel: TravelEntity) : DayItem()
+}
+
+private fun buildDaySections(
+    fromDate: LocalDate,
+    toDate: LocalDate,
+    periodTravels: List<TravelEntity>,
+    currentTravel: TravelEntity?,
+    holidays: List<Holiday>,
+    vacations: List<Vacation>,
+    zone: ZoneId
+): List<DaySection> {
+    val days = datesBetweenInclusive(fromDate, toDate)
+
+    val travelsByDay = periodTravels.groupBy { BillingPeriodStore.millisToLocalDate(it.startTimestamp, zone) }
+    val holidaysByDay = holidays.groupBy { it.date }
+
+    return days.map { day ->
+        val items = mutableListOf<DayItem>()
+
+        holidaysByDay[day]?.forEach { items.add(DayItem.HolidayItem(it)) }
+
+        vacations.filter { day in it.from..it.to }
+            .forEach { items.add(DayItem.VacationItem(it)) }
+
+        travelsByDay[day]?.forEach { items.add(DayItem.TravelItem(it)) }
+
+        // Si el currentTravel existe y cae este día, lo metemos aunque no esté en allTravels aún (por seguridad)
+        if (currentTravel != null) {
+            val d = BillingPeriodStore.millisToLocalDate(currentTravel.startTimestamp, zone)
+            if (d == day && currentTravel.status == TravelStatus.IN_PROGRESS) {
+                if (items.none { it is DayItem.TravelItem && it.travel.id == currentTravel.id }) {
+                    items.add(DayItem.TravelItem(currentTravel))
+                }
+            }
+        }
+
+        DaySection(day, items)
+    }
+}
+
+private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
+    if (to.isBefore(from)) return emptyList()
+    val out = ArrayList<LocalDate>()
+    var d = from
+    while (!d.isAfter(to)) {
+        out.add(d)
+        d = d.plusDays(1)
+    }
+    return out
 }
 
 /* =========================
@@ -600,6 +670,41 @@ private fun KpiLine(title: String, value: String, subtitle: String) {
 }
 
 @Composable
+private fun DayHeader(
+    date: LocalDate,
+    dateFormatter: DateTimeFormatter,
+    dowFormatter: DateTimeFormatter
+) {
+    val dow = date.format(dowFormatter).replaceFirstChar { it.uppercase() }
+    val dmy = date.format(dateFormatter)
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("$dmy · $dow", fontWeight = FontWeight.Bold)
+            Text("Día ${date.dayOfMonth}", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun EmptyDayRow() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Sin viajes (0 km / 0 €)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun HolidayRow(h: Holiday, onDelete: () -> Unit) {
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
@@ -611,7 +716,7 @@ private fun HolidayRow(h: Holiday, onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("🔴 FESTIVO · ${h.date}", fontWeight = FontWeight.Bold)
+                Text("🔴 FESTIVO", fontWeight = FontWeight.Bold)
                 Text(h.description.ifBlank { "—" }, color = MaterialTheme.colorScheme.onErrorContainer)
             }
             TextButton(onClick = onDelete) { Text("Eliminar") }
@@ -631,10 +736,28 @@ private fun VacationRow(v: Vacation, onDelete: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text("🟡 VACACIONES · ${v.from} → ${v.to}", fontWeight = FontWeight.Bold)
-                Text(v.description.ifBlank { "—" }, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                Text("🟡 VACACIONES", fontWeight = FontWeight.Bold)
+                Text("${v.from} → ${v.to}", color = MaterialTheme.colorScheme.onTertiaryContainer)
+                if (v.description.isNotBlank()) {
+                    Text(v.description, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                }
             }
             TextButton(onClick = onDelete) { Text("Eliminar") }
+        }
+    }
+}
+
+@Composable
+private fun InProgressRow(travel: TravelEntity, onClick: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() }
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("${travel.origin} → ${travel.destination}", style = MaterialTheme.typography.titleMedium)
+            Text("KM inicio: ${travel.kmStart} | Draft: ${travel.hoursDraft ?: 0.0}h")
         }
     }
 }
@@ -717,7 +840,7 @@ private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEn
 }
 
 /* =========================
-   Date helpers
+   Date helpers / KPI helpers
    ========================= */
 
 private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
@@ -744,12 +867,6 @@ private fun countWeekdaysInclusive(from: LocalDate, to: LocalDate): Int {
 private fun countWeekdaysInSet(from: LocalDate, to: LocalDate, dates: Set<LocalDate>): Int {
     if (dates.isEmpty()) return 0
     return dates.count { it in from..to && it.dayOfWeek != DayOfWeek.SATURDAY && it.dayOfWeek != DayOfWeek.SUNDAY }
-}
-
-private fun rangesOverlap(aFrom: LocalDate, aTo: LocalDate, bFrom: LocalDate, bTo: LocalDate): Boolean {
-    val x1 = if (aFrom.isAfter(aTo)) aTo else aFrom
-    val x2 = if (aFrom.isAfter(aTo)) aFrom else aTo
-    return !(x2.isBefore(bFrom) || x1.isAfter(bTo))
 }
 
 private fun expandVacationDates(vacations: List<Vacation>, periodFrom: LocalDate, periodTo: LocalDate): Set<LocalDate> {
