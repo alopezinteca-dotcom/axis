@@ -17,6 +17,11 @@ class TravelRepository(
         travelDao.updateHoursDraft(id, hoursDraft)
     }
 
+    // ✅ NUEVO
+    suspend fun setInvoiced(id: String, isInvoiced: Boolean) {
+        travelDao.setInvoiced(id, isInvoiced)
+    }
+
     suspend fun closeTravel(
         id: String,
         kmEnd: Int,
