@@ -24,7 +24,11 @@ interface TravelDao {
     @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
     suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
 
-    // ✅ Cierre definitivo (ahora incluye snapshots de parámetros)
+    // ✅ NUEVO: Marcar como facturado / no facturado
+    @Query("UPDATE travels SET isInvoiced = :isInvoiced WHERE id = :id")
+    suspend fun setInvoiced(id: String, isInvoiced: Boolean)
+
+    // Cierre definitivo con snapshots (como lo tenías)
     @Query(
         """
         UPDATE travels
