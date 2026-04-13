@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [TravelEntity::class],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -27,7 +27,6 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "axis.db"
                 )
-                    // DEV: recrea la DB cuando cambian columnas
                     .fallbackToDestructiveMigration()
                     .build()
 
