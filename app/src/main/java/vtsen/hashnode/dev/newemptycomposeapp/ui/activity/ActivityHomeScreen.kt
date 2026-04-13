@@ -17,9 +17,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -65,14 +69,15 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 
 /**
- * DatePicker / DatePickerDialog son experimentales en Material3. [1](https://www.scoro.com/blog/billable-utilization/)
+ * DatePicker / DatePickerDialog son experimentales en Material3, por eso el OptIn. [1](https://www.scoro.com/blog/billable-utilization/)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityHomeScreen(
     viewModel: ActivityViewModel,
     onNewTravelClick: () -> Unit,
-    onCurrentTravelClick: () -> Unit
+    onCurrentTravelClick: () -> Unit,
+    onEditTravelClick: (String) -> Unit = {} // ✅ opcional para que compile aunque aún no exista pantalla de edición
 ) {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
@@ -99,7 +104,6 @@ fun ActivityHomeScreen(
 
     LaunchedEffect(storedPeriod.fromMillis, storedPeriod.toMillis) {
         if (storedPeriod.fromMillis == 0L || storedPeriod.toMillis == 0L) {
-            // Primera vez: guardamos mes actual
             BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second)
             fromMillis = defaultPeriod.first
             toMillis = defaultPeriod.second
@@ -135,7 +139,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 2) DATOS FILTRADOS POR PERIODO
+    // 2) VIAJES FILTRADOS POR PERIODO (LISTADO DERECHA)
     // =========================
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
         derivedStateOf {
@@ -145,44 +149,40 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 3) KPI REAL PERIODO (lo que ya tienes)
+    // 3) KPI REAL PERIODO
     // =========================
-    val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
+    val totalEstimadoPeriodo by remember(periodTravels) {
+        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
+    }
 
-    // Horas imputadas reales del periodo: SOLO CERRADOS (decisión tuya)
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels
-                .filter { it.status == TravelStatus.CLOSED }
+                .filter { it.status == TravelStatus.CLOSED } // ✅ SOLO CERRADOS (tu decisión)
                 .sumOf { it.hoursImputed ?: 0.0 }
         }
     }
 
-    // Total km periodo: cerrados (kmEnd-kmStart). En curso sólo si más adelante guardas km provisional.
-    val kmPeriodo by remember(periodTravels, currentTravel, fromMillis, toMillis) {
+    val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
-            val closedKm = periodTravels
+            periodTravels
                 .filter { it.status == TravelStatus.CLOSED }
                 .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
-
-            // Si en el futuro añadimos km provisional para en curso, se sumará aquí.
-            closedKm
         }
     }
 
     // =========================
-    // 4) KPI TEÓRICO (por ahora SIN festivos/vacaciones aún)
-    //    *Implementación completa vendrá en el siguiente paso*
+    // 4) KPI TEÓRICO (aprox L-V; festivos/vacaciones en siguiente paso)
     // =========================
     val diasLaborablesAprox by remember(fromDate, toDate) {
-        derivedStateOf { countWeekdaysInclusive(fromDate, toDate) } // sin festivos/vacaciones todavía
+        derivedStateOf { countWeekdaysInclusive(fromDate, toDate) }
     }
     val totalFacturarObjetivo by remember(diasLaborablesAprox) { derivedStateOf { 350.0 * diasLaborablesAprox } }
     val horasObjetivo by remember(diasLaborablesAprox) { derivedStateOf { 8.0 * diasLaborablesAprox } }
     val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
 
     // =========================
-    // 5) KPI ANUAL (desde 1 de enero)
+    // 5) KPI ANUAL + PENDIENTE
     // =========================
     val yearStartMillis = remember {
         BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
@@ -195,13 +195,21 @@ fun ActivityHomeScreen(
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
 
-    val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
+    val totalAnualEstimado by remember(travelsYear) {
+        derivedStateOf { travelsYear.sumOf { it.billingExpected } }
+    }
 
-    // Pendiente de facturar (TODOS no facturados) → aún no implementado porque falta el check "Facturado"
-    val pendienteFacturarPlaceholder = "—"
+    // ✅ Pendiente de facturar REAL = TODOS los viajes no facturados (tu definición literal)
+    val pendienteFacturar by remember(allTravels) {
+        derivedStateOf {
+            allTravels
+                .filter { !it.isInvoiced }
+                .sumOf { it.billingExpected }
+        }
+    }
 
     // =========================
-    // 6) Export CSV (se mantiene)
+    // 6) EXPORT CSV (se mantiene)
     // =========================
     fun triggerExport(folderUri: Uri) {
         if (isExporting) return
@@ -244,7 +252,6 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Dialog "Desde"
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -265,7 +272,6 @@ fun ActivityHomeScreen(
             ) { DatePicker(state = fromPickerState) }
         }
 
-        // Dialog "Hasta"
         if (showToPicker) {
             DatePickerDialog(
                 onDismissRequest = { showToPicker = false },
@@ -294,16 +300,16 @@ fun ActivityHomeScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // ============================================
-            // PANEL IZQUIERDO 35%: KPIs por BLOQUES (P0.5)
-            // ============================================
+            // PANEL IZQUIERDO
             Column(
-                modifier = Modifier.weight(0.35f).fillMaxHeight(),
+                modifier = Modifier
+                    .weight(0.35f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
-                // ---- BLOQUE 1: PERIODO ----
                 BlockTitle("Periodo de facturación")
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
@@ -341,7 +347,6 @@ fun ActivityHomeScreen(
 
                 SectionDivider()
 
-                // ---- BLOQUE 2: TEÓRICO ----
                 BlockTitle("Teórico (Objetivos)")
                 KpiLine("Días laborables", diasLaborablesAprox.toString(), "sin festivos/vacaciones aún")
                 KpiLine("Total facturar", formatCurrency(totalFacturarObjetivo), "350 € × día laborable")
@@ -350,22 +355,33 @@ fun ActivityHomeScreen(
 
                 SectionDivider()
 
-                // ---- BLOQUE 3: REAL (PERIODO) ----
                 BlockTitle("Real (Periodo)")
                 KpiLine("Total estimado periodo", formatCurrency(totalEstimadoPeriodo), "suma de viajes del rango")
                 KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo viajes cerrados")
-                KpiLine("Δ Horas (objetivo - imputadas)", formatHours(deltaHoras), "positivo = faltan horas")
+
+                val deltaColor = if (deltaHoras >= 0) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.errorContainer
+                val deltaSubtitle = if (deltaHoras >= 0) "margen positivo" else "excedidas (alerta)"
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = deltaColor),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(10.dp)) {
+                        Text("Δ Horas (objetivo - imputadas)", style = MaterialTheme.typography.labelMedium)
+                        Text(formatHours(deltaHoras), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(deltaSubtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
 
                 SectionDivider()
 
-                // ---- BLOQUE 4: ANUAL + PENDIENTE ----
-                BlockTitle("Anual + Pendiente")
+                BlockTitle("Anual + Tesorería")
                 KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 de enero")
-                KpiLine("Pendiente de facturar", pendienteFacturarPlaceholder, "requiere check 'facturado'")
+                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos los viajes no facturados")
 
-                Spacer(modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Export se mantiene
                 Button(
                     onClick = {
                         val folderUri = ExportPreferences.getFolderUri(context)
@@ -385,9 +401,7 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // ============================================
-            // PANEL DERECHO 65%: LISTADO SOLO DEL PERIODO
-            // ============================================
+            // PANEL DERECHO
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -398,7 +412,6 @@ fun ActivityHomeScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    // EN CURSO solo si cae dentro del periodo (se mantiene)
                     val showCurrent = currentTravel?.startTimestamp?.let { it in fromMillis..toMillis } == true
                     if (showCurrent) {
                         item {
@@ -419,9 +432,16 @@ fun ActivityHomeScreen(
                         }
                     }
 
-                    // Cerrados del periodo, con fecha visible (se mantiene)
                     val closed = periodTravels.filter { it.status == TravelStatus.CLOSED }
-                    items(closed) { t -> TravelRowCard(t, zone, dateFormatter) }
+                    items(closed) { t ->
+                        TravelRowCard(
+                            travel = t,
+                            zone = zone,
+                            dateFormatter = dateFormatter,
+                            onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
+                            onClick = { onEditTravelClick(t.id) }
+                        )
+                    }
                 }
             }
         }
@@ -429,7 +449,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   UI helpers (premium)
+   UI helpers
    ========================= */
 
 @Composable
@@ -445,9 +465,7 @@ private fun BlockTitle(text: String) {
 @Composable
 private fun SectionDivider() {
     Spacer(modifier = Modifier.height(10.dp))
-    HorizontalDivider(
-        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f)
-    )
+    HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f))
     Spacer(modifier = Modifier.height(10.dp))
 }
 
@@ -467,35 +485,58 @@ private fun KpiLine(title: String, value: String, subtitle: String) {
 }
 
 /* =========================
-   List row
+   List row con Checkbox
    ========================= */
 
 @Composable
 private fun TravelRowCard(
     travel: TravelEntity,
     zone: ZoneId,
-    dateFormatter: DateTimeFormatter
+    dateFormatter: DateTimeFormatter,
+    onToggleInvoiced: (Boolean) -> Unit,
+    onClick: () -> Unit
 ) {
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDate(travel.startTimestamp, zone).format(dateFormatter)
 
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
     ) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
+                    Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Fact.", style = MaterialTheme.typography.labelMedium)
+                    Checkbox(
+                        checked = travel.isInvoiced,
+                        onCheckedChange = { onToggleInvoiced(it) },
+                        colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                    )
+                }
+            }
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
+                Text("Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
                 Text("€ ${formatCurrencyNumber(travel.billingExpected)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
             }
-            Text("Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
-            Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 /* =========================
-   Export IO (se mantiene)
+   Export IO
    ========================= */
 
 private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEntity>) {
@@ -539,10 +580,6 @@ private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
     return startMillis to endMillis
 }
 
-/**
- * Cuenta días laborables (L-V) incluyendo ambos extremos.
- * OJO: de momento NO descuenta festivos ni vacaciones (lo haremos en el paso siguiente).
- */
 private fun countWeekdaysInclusive(from: LocalDate, to: LocalDate): Int {
     if (to.isBefore(from)) return 0
     var d = from
@@ -557,5 +594,4 @@ private fun countWeekdaysInclusive(from: LocalDate, to: LocalDate): Int {
 
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
-private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.2f h", value)
-
+private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
