@@ -72,7 +72,6 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
 
 /**
@@ -151,10 +150,10 @@ fun ActivityHomeScreen(
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
 
-    // Dialog gestión calendario (📅)
+    // Diálogo gestión calendario (📅)
     var showCalendarManager by remember { mutableStateOf(false) }
 
-    // Dialogs añadir festivo/vacaciones (ya los tienes, los reutilizamos)
+    // Dialogs añadir festivo/vacaciones
     var showAddHoliday by remember { mutableStateOf(false) }
     var showAddVacation by remember { mutableStateOf(false) }
     var holidayDesc by remember { mutableStateOf("") }
@@ -285,7 +284,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // UI: Pickers periodo + Añadir festivo/vacaciones
+    // UI: Scaffold con TopAppBar + 📅
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -310,7 +309,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers desde/hasta
+        // Pickers periodo
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -416,7 +415,7 @@ fun ActivityHomeScreen(
             }
         }
 
-        // Layout principal (paneles)
+        // Layout principal
         Row(
             modifier = Modifier
                 .fillMaxSize()
@@ -424,7 +423,7 @@ fun ActivityHomeScreen(
                 .padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // IZQUIERDA (KPIs)
+            // IZQUIERDA KPIs
             Column(
                 modifier = Modifier
                     .weight(0.35f)
@@ -511,7 +510,7 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // DERECHA (listado simple del periodo, como venías haciendo)
+            // DERECHA listado
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -557,7 +556,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   UI helpers + export + KPI helpers
+   Helpers
    ========================= */
 
 @Composable
