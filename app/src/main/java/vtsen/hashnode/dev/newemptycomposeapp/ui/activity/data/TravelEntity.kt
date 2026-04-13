@@ -31,10 +31,13 @@ data class TravelEntity(
     val impactEuroAlejandro: Double? = null,
 
     // Snapshots de parámetros usados (Excel NO recalcula)
-    val snapCosteKmOperativo: Double? = null,        // 0.19
-    val snapCosteDietaFija: Double? = null,          // 12.00
-    val snapPorcBenefExigidoA: Double? = null,       // 0.35
-    val snapCosteHoraAlejandro: Double? = null,      // 26.00
-    val snapCosteHoraEmpresaX: Double? = null,       // 36.65
-    val snapTarifaObjetivoY: Double? = null          // 42.14
+    val snapCosteKmOperativo: Double? = null,
+    val snapCosteDietaFija: Double? = null,
+    val snapPorcBenefExigidoA: Double? = null,
+    val snapCosteHoraAlejandro: Double? = null,
+    val snapCosteHoraEmpresaX: Double? = null,
+    val snapTarifaObjetivoY: Double? = null,
+
+    // ✅ NUEVO (V2): Facturación manual
+    val isInvoiced: Boolean = false
 )
