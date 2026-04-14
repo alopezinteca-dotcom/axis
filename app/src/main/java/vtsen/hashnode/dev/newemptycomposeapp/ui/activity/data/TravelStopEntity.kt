@@ -8,10 +8,7 @@ import java.util.UUID
 
 @Entity(
     tableName = "travel_stops",
-    indices = [
-        Index(value = ["travelId"]),
-        Index(value = ["timestamp"])
-    ],
+    indices = [Index("travelId"), Index("timestamp")],
     foreignKeys = [
         ForeignKey(
             entity = TravelEntity::class,
@@ -26,5 +23,6 @@ data class TravelStopEntity(
     val travelId: String,
     val timestamp: Long = System.currentTimeMillis(),
     val place: String,
-    val km: Int? = null
+    // KM opcional = odómetro/cuentakm en esa parada
+    val kmOdometer: Int? = null
 )
