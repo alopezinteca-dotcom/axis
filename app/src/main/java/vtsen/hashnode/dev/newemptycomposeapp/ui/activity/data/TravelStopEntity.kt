@@ -23,6 +23,5 @@ data class TravelStopEntity(
     val travelId: String,
     val timestamp: Long = System.currentTimeMillis(),
     val place: String,
-    // KM opcional = odómetro/cuentakm en esa parada
     val kmOdometer: Int? = null
 )
