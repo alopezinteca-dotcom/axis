@@ -92,6 +92,7 @@ fun ActivityHomeScreen(
 
     val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
+    val stopsForCurrent by viewModel.stopsForCurrentTravel.collectAsStateWithLifecycle()
 
     // =========================
     // 1) PERIODO (DataStore)
@@ -180,7 +181,29 @@ LaunchedEffect(fromMillis, toMillis) {
             else allTravels.filter { it.startTimestamp in fromMillis..toMillis }
         }
     }
+// =========================
+// 3.1) DÍAS + AGRUPACIONES PARA TIMELINE (por día)
+// =========================
+val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
 
+val daysInRange = remember(fromDate, toDate) {
+    datesBetweenInclusive(fromDate, toDate) // helper al final del archivo
+}
+
+// Viajes agrupados por día
+val travelsByDay = remember(periodTravels, zone) {
+    periodTravels.groupBy { t ->
+        BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone)
+    }
+}
+
+// Paradas agrupadas por día (solo contador)
+val stopsCountByDay = remember(stopsInPeriod, zone) {
+    stopsInPeriod
+        .groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
+        .mapValues { it.value.size }
+}
+ 
     // =========================
     // 4) KPI REAL PERIODO
     // =========================
@@ -506,47 +529,85 @@ LaunchedEffect(fromMillis, toMillis) {
                 }
             }
 
-            // DERECHA listado
-            Column(
-                modifier = Modifier.weight(0.65f).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text("Viajes del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+           // DERECHA: TIMELINE POR DÍA (ASC)
+Column(
+    modifier = Modifier.weight(0.65f).fillMaxHeight(),
+    verticalArrangement = Arrangement.spacedBy(12.dp)
+) {
+    Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
-                LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxSize()
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        items(daysInRange) { day ->
+
+            // Cabecera del día
+            DayHeader(day = day, dateFormatter = dateFormatter)
+
+            // 📍 Solo número de paradas del día
+            val stopCount = stopsCountByDay[day] ?: 0
+            if (stopCount > 0) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    val showCurrent = currentTravel?.startTimestamp?.let { it in fromMillis..toMillis } == true
-                    if (showCurrent) {
-                        item {
-                            val t = currentTravel!!
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                                modifier = Modifier.fillMaxWidth().clickable { onCurrentTravelClick() }
-                            ) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text("${t.origin} → ${t.destination}", style = MaterialTheme.typography.titleMedium)
-                                    Text("KM inicio: ${t.kmStart} | Draft: ${t.hoursDraft ?: 0.0}h")
-                                }
-                            }
-                        }
-                    }
-
-                    val closed = periodTravels.filter { it.status == TravelStatus.CLOSED }
-                    items(closed) { t ->
-                        TravelRowCard(
-                            travel = t,
-                            zone = zone,
-                            dateFormatter = dateFormatter,
-                            onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
-                            onClick = { onEditTravelClick(t.id) }
-                        )
+                    Row(
+                        Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📍 $stopCount", fontWeight = FontWeight.Bold)
                     }
                 }
             }
+
+            // EN CURSO si pertenece a este día
+            val current = currentTravel
+            val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDate(it, zone) }
+            if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onCurrentTravelClick() }
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("${current.origin} → ${current.destination}", style = MaterialTheme.typography.titleMedium)
+                        Text("KM inicio: ${current.kmStart} | Draft: ${current.hoursDraft ?: 0.0}h")
+                    }
+                }
+            }
+
+            // Viajes cerrados del día (orden ascendente)
+            val travelsToday = (travelsByDay[day] ?: emptyList())
+                .filter { it.status == TravelStatus.CLOSED }
+                .sortedBy { it.startTimestamp }
+
+            // Día vacío
+            if (stopCount == 0 && (currentDay != day) && travelsToday.isEmpty()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(Modifier.padding(12.dp)) {
+                        Text("Sin viajes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            } else {
+                travelsToday.forEach { t ->
+                    TravelRowCard(
+                        travel = t,
+                        zone = zone,
+                        dateFormatter = dateFormatter,
+                        onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
+                        onClick = { onEditTravelClick(t.id) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
         }
     }
 }
