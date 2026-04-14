@@ -50,25 +50,24 @@ fun NewTravelScreen(
     var billing by rememberSaveable { mutableStateOf("") }
     var hasDiet by rememberSaveable { mutableStateOf(false) }
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
-    
-    // Mejora UX-A: No persistir estados volátiles de UI
+
     var isFetchingLocation by remember { mutableStateOf(false) }
-    // Mejora UX-B: Feedback visual de autocompletado
     var isGpsAutocompleted by remember { mutableStateOf(false) }
 
     val isKmError by remember { derivedStateOf { kmStart.isNotEmpty() && kmStart.toIntOrNull() == null } }
-    val isBillingError by remember { 
-        derivedStateOf { 
-            billing.isNotEmpty() && billing.replace(',', '.').toDoubleOrNull() == null 
-        } 
+    val isBillingError by remember {
+        derivedStateOf {
+            billing.isNotEmpty() && billing.replace(',', '.').toDoubleOrNull() == null
+        }
     }
+
     val canConfirm by remember {
         derivedStateOf {
-            origin.isNotBlank() && 
-            destination.isNotBlank() && 
-            kmStart.isNotBlank() && !isKmError &&
-            billing.isNotBlank() && !isBillingError &&
-            !isFetchingLocation
+            origin.isNotBlank() &&
+                destination.isNotBlank() &&
+                kmStart.isNotBlank() && !isKmError &&
+                billing.isNotBlank() && !isBillingError &&
+                !isFetchingLocation
         }
     }
 
@@ -85,7 +84,6 @@ fun NewTravelScreen(
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     geocoder.getFromLocation(location.latitude, location.longitude, 1) { addresses ->
                         val address = addresses.firstOrNull()?.getAddressLine(0)
-                        // Limpieza 3: coroutineScope.launch hereda Main por defecto en Compose
                         coroutineScope.launch {
                             origin = address ?: "${location.latitude}, ${location.longitude}"
                             isFetchingLocation = false
@@ -104,7 +102,7 @@ fun NewTravelScreen(
                         }
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 origin = "${location.latitude}, ${location.longitude}"
                 isFetchingLocation = false
                 isGpsAutocompleted = true
@@ -115,13 +113,17 @@ fun NewTravelScreen(
     @SuppressLint("MissingPermission")
     suspend fun getFreshLocation() {
         try {
-            val location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
-            if (location != null) fetchAddress(location)
-            else {
+            val location = fusedLocationClient
+                .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                .await()
+
+            if (location != null) {
+                fetchAddress(location)
+            } else {
                 errorMessage = "GPS frío o sin señal. Inténtalo de nuevo."
                 isFetchingLocation = false
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             errorMessage = "Error al conectar con servicios de ubicación."
             isFetchingLocation = false
         }
@@ -141,15 +143,19 @@ fun NewTravelScreen(
 
     fun onLocationClick() {
         errorMessage = null
-        // 🟢 Corrección 1: Comprobar tanto FINE como COARSE
         val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        
+
         if (fine || coarse) {
             isFetchingLocation = true
             coroutineScope.launch { getFreshLocation() }
         } else {
-            permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
         }
     }
 
@@ -161,7 +167,6 @@ fun NewTravelScreen(
             )
         }
     ) { padding ->
-        // 🟢 Corrección 2: Column es el que scrollea, protegiendo el diseño frente al teclado
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -173,19 +178,18 @@ fun NewTravelScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // COLUMNA IZQUIERDA: RUTA Y CONTEXTO
                 Card(
                     modifier = Modifier.weight(1f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         Text("Ruta y Contexto", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        
+
                         OutlinedTextField(
                             value = origin,
-                            onValueChange = { 
+                            onValueChange = {
                                 origin = it
-                                isGpsAutocompleted = false // Se borra la marca si edita a mano
+                                isGpsAutocompleted = false
                             },
                             label = { Text("Origen") },
                             modifier = Modifier.fillMaxWidth(),
@@ -195,9 +199,12 @@ fun NewTravelScreen(
                                 }
                             },
                             trailingIcon = {
-                                if (isFetchingLocation) CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                                else IconButton(onClick = { onLocationClick() }, enabled = !isFetchingLocation) {
-                                    Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                if (isFetchingLocation) {
+                                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                                } else {
+                                    IconButton(onClick = { onLocationClick() }, enabled = !isFetchingLocation) {
+                                        Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    }
                                 }
                             }
                         )
@@ -219,7 +226,6 @@ fun NewTravelScreen(
                     }
                 }
 
-                // COLUMNA DERECHA: ECONOMÍA Y ACCIÓN
                 Card(
                     modifier = Modifier.weight(1f),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
