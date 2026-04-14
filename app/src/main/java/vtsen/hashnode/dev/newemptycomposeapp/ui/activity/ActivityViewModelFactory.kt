@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.AppDatabase
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopRepository
 
 class ActivityViewModelFactory(
     private val context: Context
@@ -13,7 +14,8 @@ class ActivityViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val db = AppDatabase.getDatabase(context.applicationContext)
-        val repository = TravelRepository(db.travelDao())
-        return ActivityViewModel(repository) as T
+        val repo = TravelRepository(db.travelDao())
+        val stopRepo = TravelStopRepository(db.travelStopDao())
+        return ActivityViewModel(repo, stopRepo) as T
     }
 }
