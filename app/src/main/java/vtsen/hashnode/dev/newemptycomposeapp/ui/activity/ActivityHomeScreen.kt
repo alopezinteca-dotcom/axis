@@ -1,4 +1,140 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vtsen.hashnode.dev.newemptycomposeapp.ui.activityType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Dieta", fontWeight = FontWeight.SemiBold)
+                        Switch(checked = editHasDiet, onCheckedChange = { editHasDiet = it })
+                    }
+
+                    OutlinedTextField(
+                        value = editKmStart,
+                        onValueChange = { editKmStart = it.filter(Char::isDigit) },
+                        label = { Text("KM inicio") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editKmEnd,
+                        onValueChange = { editKmEnd = it.filter(Char::isDigit) },
+                        label = { Text("KM fin (vacío si no cerrado)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editHoursImputed,
+                        onValueChange = { editHoursImputed = it },
+                        label = { Text("Horas imputadas (si cerrado)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Facturado", fontWeight = FontWeight.SemiBold)
+                        Switch(checked = editIsInvoiced, onCheckedChange = { editIsInvoiced = it })
+                    }
+
+                    editWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val base = original
+                    if (base == null) {
+                        showEditDialog = false
+                        return@TextButton
+                    }
+
+                    val kmStart = editKmStart.toIntOrNull()
+                    if (kmStart == null || kmStart <= 0) {
+                        editWarning = "KM inicio inválido."
+                        return@TextButton
+                    }
+
+                    val kmEnd = editKmEnd.toIntOrNull()
+                    if (editKmEnd.isNotBlank() && kmEnd == null) {
+                        editWarning = "KM fin inválido."
+                        return@TextButton
+                    }
+
+                    val billing = editBilling.replace(',', '.').toDoubleOrNull()
+                    if (billing == null || billing < 0.0) {
+                        editWarning = "Facturación inválida."
+                        return@TextButton
+                    }
+
+                    val imputed = editHoursImputed.replace(',', '.').toDoubleOrNull()
+                    if (editHoursImputed.isNotBlank() && imputed == null) {
+                        editWarning = "Horas imputadas inválidas."
+                        return@TextButton
+                    }
+
+                    // Recalcular desfase si hay hoursCalculatedSnapshot y se ha tocado imputed
+                    val hoursCalc = base.hoursCalculatedSnapshot
+                    val delta = if (imputed != null && hoursCalc != null) (imputed - hoursCalc) else base.deltaHours
+                    val modified = if (delta != null) abs(delta) > 0.01 else base.hoursModified
+                    val costeHora = base.snapCosteHoraAlejandro ?: 26.0
+                    val impact = if (delta != null) delta * costeHora else base.impactEuroAlejandro
+
+                    val updated = base.copy(
+                        origin = editOrigin.trim(),
+                        destination = editDestination.trim(),
+                        description = editDescription.trim(),
+                        billingExpected = billing,
+                        hasDiet = editHasDiet,
+                        kmStart = kmStart,
+                        kmEnd = kmEnd,
+                        hoursImputed = if (base.status == TravelStatus.CLOSED) imputed else base.hoursImputed,
+                        deltaHours = delta,
+                        hoursModified = modified,
+                        impactEuroAlejandro = impact,
+                        isInvoiced = editIsInvoiced
+                    )
+
+                    viewModel.updateTravel(updated)
+                    editWarning = null
+                    showEditDialog = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    editWarning = null
+                    showEditDialog = false
+                }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // =========================
+    // Scaffold principal
+    // =========================
+    Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        topBar = {
+            TopAppBar(
+                title = { Text("AXIS · Activity") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                ),
+                actions = {
+                    TextButton(onClick = { showCalendarManager = true }) {
+                        Text("📅", fontSize = MaterialTheme.typography.titleLarge.fontSize)
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = onNewTravelClick,
+                containerColor = MaterialTheme.colorScheme.primary
+            ) { Text("+", style = MaterialTheme.typography.titleLarge) }
+        }
+    ) { padding ->
+        // ---- CONTINÚA EN PARTE 2/2 ----
+        // (Pickers, Layout izquierdo KPIs, Layout derecho timeline y helpers)
+    }
+}
 
 import android.content.Context
 import android.net.Uri
@@ -36,6 +172,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -53,6 +190,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.DayOfWeek
@@ -61,6 +200,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
+import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -95,9 +235,24 @@ fun ActivityHomeScreen(
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
     val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
 
-    // Confirmación borrado viaje
+    // ===== Confirmación borrar viaje =====
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var travelToDeleteId by remember { mutableStateOf<String?>(null) }
+
+    // ===== Diálogo editar viaje (NUEVO) =====
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editingTravelId by remember { mutableStateOf<String?>(null) }
+    var editWarning by remember { mutableStateOf<String?>(null) }
+
+    var editOrigin by remember { mutableStateOf("") }
+    var editDestination by remember { mutableStateOf("") }
+    var editDescription by remember { mutableStateOf("") }
+    var editBilling by remember { mutableStateOf("") }
+    var editHasDiet by remember { mutableStateOf(false) }
+    var editKmStart by remember { mutableStateOf("") }
+    var editKmEnd by remember { mutableStateOf("") }
+    var editHoursImputed by remember { mutableStateOf("") }
+    var editIsInvoiced by remember { mutableStateOf(false) }
 
     // =========================
     // 1) PERIODO (DataStore)
@@ -122,7 +277,7 @@ fun ActivityHomeScreen(
         }
     }
 
-    // Muy importante: cargamos las paradas del periodo en el VM
+    // Cargamos paradas del periodo en VM (para contar por día)
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis != 0L && toMillis != 0L) {
             viewModel.setStopsRange(fromMillis, toMillis)
@@ -130,12 +285,10 @@ fun ActivityHomeScreen(
     }
 
     val fromDate = remember(fromMillis) {
-        if (fromMillis == 0L) LocalDate.now()
-        else BillingPeriodStore.millisToLocalDate(fromMillis, zone)
+        if (fromMillis == 0L) LocalDate.now() else BillingPeriodStore.millisToLocalDate(fromMillis, zone)
     }
     val toDate = remember(toMillis) {
-        if (toMillis == 0L) LocalDate.now()
-        else BillingPeriodStore.millisToLocalDate(toMillis, zone)
+        if (toMillis == 0L) LocalDate.now() else BillingPeriodStore.millisToLocalDate(toMillis, zone)
     }
 
     var showFromPicker by remember { mutableStateOf(false) }
@@ -159,7 +312,6 @@ fun ActivityHomeScreen(
     // =========================
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
-
     var showCalendarManager by remember { mutableStateOf(false) }
 
     var showAddHoliday by remember { mutableStateOf(false) }
@@ -209,16 +361,14 @@ fun ActivityHomeScreen(
 
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf {
-            periodTravels
-                .filter { it.status == TravelStatus.CLOSED }
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { it.hoursImputed ?: 0.0 }
         }
     }
 
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
-            periodTravels
-                .filter { it.status == TravelStatus.CLOSED }
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
         }
     }
@@ -260,10 +410,420 @@ fun ActivityHomeScreen(
     // =========================
     // 5) Export CSV ÚNICO (TRAVEL + STOP)
     // =========================
+    fun unifiedExportFileName(): String {
+        val stamp = java.text.SimpleDateFormat("yyyy_MM", Locale.getDefault()).format(java.util.Date())
+        return "AXIS_export_$stamp.csv"
+    }
+
     fun triggerExport(folderUri: Uri) {
         if (isExporting) return
         isExporting = true
+        val fileName = unifiedExportFileName()
 
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    exportUnifiedCsvIO(
+                        context = context,
+                        folderUri = folderUri,
+                        fileName = fileName,
+                        travels = periodTravels,
+                        stops = stopsInPeriod
+                    )
+                }
+                snackbarHostState.showSnackbar("✅ Exportado: $fileName")
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
+            } finally {
+                isExporting = false
+            }
+        }
+    }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            ExportPreferences.saveFolderUri(context, it)
+            triggerExport(it)
+        }
+    }
+
+    // =========================
+    // UI: Gestión calendario (📅)
+    // =========================
+    if (showCalendarManager) {
+        CalendarManagementDialog(
+            holidays = allHolidays,
+            vacations = allVacations,
+            onAddHoliday = { showAddHoliday = true },
+            onAddVacation = { showAddVacation = true },
+            onDeleteHoliday = { h ->
+                val raw = CalendarOverridesStore.toRawHoliday(h)
+                coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
+            },
+            onDeleteVacation = { v ->
+                val raw = CalendarOverridesStore.toRawVacation(v)
+                coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
+            },
+            onDismiss = { showCalendarManager = false }
+        )
+    }
+
+    // Confirm borrar viaje
+    if (showDeleteConfirm && travelToDeleteId != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Eliminar viaje") },
+            text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteTravel(travelToDeleteId!!)
+                    travelToDeleteId = null
+                    showDeleteConfirm = false
+                }) { Text("Eliminar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // ===== Dialog editar viaje (NUEVO) =====
+    if (showEditDialog && editingTravelId != null) {
+        val original = allTravels.firstOrNull { it.id == editingTravelId }
+
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Editar viaje", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    original?.let {
+                        if (it.status == TravelStatus.CLOSED) {
+                            Text("⚠️ Editando viaje CERRADO (histórico).", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = editOrigin,
+                        onValueChange = { editOrigin = it },
+                        label = { Text("Origen") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editDestination,
+                        onValueChange = { editDestination = it },
+                        label = { Text("Destino") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editDescription,
+                        onValueChange = { editDescription = it },
+                        label = { Text("Descripción / Ref") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editBilling,
+                        onValueChange = { editBilling = it },
+                        label = { Text("Facturación (€)") },
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
+
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.temporal.TemporalAdjusters
+import java.util.Locale
+import kotlin.math.abs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisUnifiedCsvExporter
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportPreferences
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ActivityHomeScreen(
+    viewModel: ActivityViewModel,
+    onNewTravelClick: () -> Unit,
+    onCurrentTravelClick: () -> Unit,
+    onEditTravelClick: (String) -> Unit = {} // compat: ya no lo usamos, editamos en diálogo
+) {
+    val context = LocalContext.current
+    val zone = remember { ZoneId.systemDefault() }
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
+
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var isExporting by remember { mutableStateOf(false) }
+
+    val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
+    val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
+    val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
+
+    // ===== Confirmación borrar viaje =====
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var travelToDeleteId by remember { mutableStateOf<String?>(null) }
+
+    // ===== Editar viaje (diálogo) =====
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editingTravelId by remember { mutableStateOf<String?>(null) }
+    var editWarning by remember { mutableStateOf<String?>(null) }
+
+    var editOrigin by remember { mutableStateOf("") }
+    var editDestination by remember { mutableStateOf("") }
+    var editDescription by remember { mutableStateOf("") }
+    var editBilling by remember { mutableStateOf("") }
+    var editHasDiet by remember { mutableStateOf(false) }
+    var editKmStart by remember { mutableStateOf("") }
+    var editKmEnd by remember { mutableStateOf("") }
+    var editHoursImputed by remember { mutableStateOf("") }
+    var editIsInvoiced by remember { mutableStateOf(false) }
+
+    fun openEditDialog(travel: TravelEntity) {
+        editingTravelId = travel.id
+        editOrigin = travel.origin
+        editDestination = travel.destination
+        editDescription = travel.description
+        editBilling = String.format(Locale.US, "%.2f", travel.billingExpected)
+        editHasDiet = travel.hasDiet
+        editKmStart = travel.kmStart.toString()
+        editKmEnd = travel.kmEnd?.toString() ?: ""
+        editHoursImputed = travel.hoursImputed?.toString() ?: ""
+        editIsInvoiced = travel.isInvoiced
+        editWarning = null
+        showEditDialog = true
+    }
+
+    // =========================
+    // 1) PERIODO (DataStore)
+    // =========================
+    val storedPeriod by BillingPeriodStore.periodFlow(context).collectAsStateWithLifecycle(
+        initialValue = BillingPeriod(0L, 0L)
+    )
+    val defaultPeriod = remember { currentMonthRangeMillis(zone) }
+
+    var fromMillis by remember { mutableStateOf(0L) }
+    var toMillis by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(storedPeriod.fromMillis, storedPeriod.toMillis) {
+        if (storedPeriod.fromMillis == 0L || storedPeriod.toMillis == 0L) {
+            BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second)
+            fromMillis = defaultPeriod.first
+            toMillis = defaultPeriod.second
+        } else {
+            fromMillis = storedPeriod.fromMillis
+            toMillis = storedPeriod.toMillis
+        }
+    }
+
+    // Cargar paradas del periodo en VM
+    LaunchedEffect(fromMillis, toMillis) {
+        if (fromMillis != 0L && toMillis != 0L) {
+            viewModel.setStopsRange(fromMillis, toMillis)
+        }
+    }
+
+    val fromDate = remember(fromMillis) {
+        if (fromMillis == 0L) LocalDate.now() else BillingPeriodStore.millisToLocalDate(fromMillis, zone)
+    }
+    val toDate = remember(toMillis) {
+        if (toMillis == 0L) LocalDate.now() else BillingPeriodStore.millisToLocalDate(toMillis, zone)
+    }
+
+    var showFromPicker by remember { mutableStateOf(false) }
+    var showToPicker by remember { mutableStateOf(false) }
+
+    val fromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+    )
+    val toPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+    )
+
+    fun saveRange(newFrom: LocalDate, newTo: LocalDate) {
+        val f = BillingPeriodStore.localDateStartMillis(newFrom, zone)
+        val t = BillingPeriodStore.localDateEndMillis(newTo, zone)
+        coroutineScope.launch { BillingPeriodStore.savePeriod(context, f, t) }
+    }
+
+    // =========================
+    // 2) Festivos + Vacaciones (manual)
+    // =========================
+    val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
+    val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
+    var showCalendarManager by remember { mutableStateOf(false) }
+
+    var showAddHoliday by remember { mutableStateOf(false) }
+    var showAddVacation by remember { mutableStateOf(false) }
+    var holidayDesc by remember { mutableStateOf("") }
+    var vacationDesc by remember { mutableStateOf("") }
+
+    val holidayPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacFromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacToPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+
+    // =========================
+    // 3) VIAJES DEL PERIODO
+    // =========================
+    val periodTravels by remember(allTravels, fromMillis, toMillis) {
+        derivedStateOf {
+            if (fromMillis == 0L || toMillis == 0L) emptyList()
+            else allTravels.filter { it.startTimestamp in fromMillis..toMillis }
+        }
+    }
+
+    // =========================
+    // 3.1) Timeline por día (ASC)
+    // =========================
+    val daysInRange = remember(fromDate, toDate) { datesBetweenInclusive(fromDate, toDate) }
+
+    val travelsByDay = remember(periodTravels, zone) {
+        periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone) }
+    }
+
+    val stopsCountByDay = remember(stopsInPeriod, zone) {
+        stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
+            .mapValues { it.value.size }
+    }
+
+    // =========================
+    // 4) KPI REAL PERIODO
+    // =========================
+    val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
+
+    val horasImputadasPeriodo by remember(periodTravels) {
+        derivedStateOf {
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
+                .sumOf { it.hoursImputed ?: 0.0 }
+        }
+    }
+
+    val kmPeriodo by remember(periodTravels) {
+        derivedStateOf {
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
+                .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
+        }
+    }
+
+    val holidayDatesInPeriod by remember(allHolidays, fromDate, toDate) {
+        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate }.map { it.date }.toSet() }
+    }
+    val vacationDatesInPeriod by remember(allVacations, fromDate, toDate) {
+        derivedStateOf { expandVacationDates(allVacations, fromDate, toDate) }
+    }
+
+    val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
+        derivedStateOf {
+            countWeekdaysInclusive(fromDate, toDate) -
+                countWeekdaysInSet(fromDate, toDate, holidayDatesInPeriod) -
+                countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
+        }
+    }
+    val diasLaborables = if (diasLaborablesReales < 0) 0 else diasLaborablesReales
+    val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
+    val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
+    val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
+
+    val yearStartMillis = remember {
+        BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
+    }
+    val nowEndMillis = remember {
+        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
+    }
+    val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
+        derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
+    }
+    val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
+
+    val pendienteFacturar by remember(allTravels) {
+        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
+    }
+
+    // =========================
+    // 5) Export CSV ÚNICO (TRAVEL + STOP)
+    // =========================
+    fun unifiedExportFileName(): String {
+        val stamp = java.text.SimpleDateFormat("yyyy_MM", Locale.getDefault()).format(java.util.Date())
+        return "AXIS_export_$stamp.csv"
+    }
+
+    fun triggerExport(folderUri: Uri) {
+        if (isExporting) return
+        isExporting = true
         val fileName = unifiedExportFileName()
 
         coroutineScope.launch {
@@ -331,6 +891,151 @@ fun ActivityHomeScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // ===== Diálogo editar viaje =====
+    if (showEditDialog && editingTravelId != null) {
+        val original = allTravels.firstOrNull { it.id == editingTravelId }
+
+        AlertDialog(
+            onDismissRequest = { showEditDialog = false },
+            title = { Text("Editar viaje", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    original?.let {
+                        if (it.status == TravelStatus.CLOSED) {
+                            Text("⚠️ Editando viaje CERRADO (histórico).", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = editOrigin,
+                        onValueChange = { editOrigin = it },
+                        label = { Text("Origen") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editDestination,
+                        onValueChange = { editDestination = it },
+                        label = { Text("Destino") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editDescription,
+                        onValueChange = { editDescription = it },
+                        label = { Text("Descripción / Ref") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editBilling,
+                        onValueChange = { editBilling = it },
+                        label = { Text("Facturación (€)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Dieta", fontWeight = FontWeight.SemiBold)
+                        Switch(checked = editHasDiet, onCheckedChange = { editHasDiet = it })
+                    }
+
+                    OutlinedTextField(
+                        value = editKmStart,
+                        onValueChange = { editKmStart = it.filter(Char::isDigit) },
+                        label = { Text("KM inicio") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editKmEnd,
+                        onValueChange = { editKmEnd = it.filter(Char::isDigit) },
+                        label = { Text("KM fin (vacío si no cerrado)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = editHoursImputed,
+                        onValueChange = { editHoursImputed = it },
+                        label = { Text("Horas imputadas (si cerrado)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Facturado", fontWeight = FontWeight.SemiBold)
+                        Switch(checked = editIsInvoiced, onCheckedChange = { editIsInvoiced = it })
+                    }
+
+                    editWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val base = original
+                    if (base == null) {
+                        showEditDialog = false
+                        return@TextButton
+                    }
+
+                    val kmStart = editKmStart.toIntOrNull()
+                    if (kmStart == null || kmStart <= 0) {
+                        editWarning = "KM inicio inválido."
+                        return@TextButton
+                    }
+
+                    val kmEnd = editKmEnd.toIntOrNull()
+                    if (editKmEnd.isNotBlank() && kmEnd == null) {
+                        editWarning = "KM fin inválido."
+                        return@TextButton
+                    }
+
+                    val billing = editBilling.replace(',', '.').toDoubleOrNull()
+                    if (billing == null || billing < 0.0) {
+                        editWarning = "Facturación inválida."
+                        return@TextButton
+                    }
+
+                    val imputed = editHoursImputed.replace(',', '.').toDoubleOrNull()
+                    if (editHoursImputed.isNotBlank() && imputed == null) {
+                        editWarning = "Horas imputadas inválidas."
+                        return@TextButton
+                    }
+
+                    val hoursCalc = base.hoursCalculatedSnapshot
+                    val delta = if (imputed != null && hoursCalc != null) (imputed - hoursCalc) else base.deltaHours
+                    val modified = if (delta != null) abs(delta) > 0.01 else base.hoursModified
+                    val costeHora = base.snapCosteHoraAlejandro ?: 26.0
+                    val impact = if (delta != null) delta * costeHora else base.impactEuroAlejandro
+
+                    val updated = base.copy(
+                        origin = editOrigin.trim(),
+                        destination = editDestination.trim(),
+                        description = editDescription.trim(),
+                        billingExpected = billing,
+                        hasDiet = editHasDiet,
+                        kmStart = kmStart,
+                        kmEnd = if (editKmEnd.isBlank()) base.kmEnd else kmEnd,
+                        hoursImputed = if (base.status == TravelStatus.CLOSED) imputed else base.hoursImputed,
+                        deltaHours = delta,
+                        hoursModified = modified,
+                        impactEuroAlejandro = impact,
+                        isInvoiced = editIsInvoiced
+                    )
+
+                    viewModel.updateTravel(updated)
+                    editWarning = null
+                    showEditDialog = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    editWarning = null
+                    showEditDialog = false
+                }) { Text("Cancelar") }
             }
         )
     }
@@ -627,7 +1332,7 @@ fun ActivityHomeScreen(
                                     zone = zone,
                                     dateFormatter = dateFormatter,
                                     onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
-                                    onClick = { onEditTravelClick(t.id) },
+                                    onEdit = { openEditDialog(t) },
                                     onDelete = {
                                         travelToDeleteId = t.id
                                         showDeleteConfirm = true
@@ -681,7 +1386,7 @@ private fun TravelRowCard(
     zone: ZoneId,
     dateFormatter: DateTimeFormatter,
     onToggleInvoiced: (Boolean) -> Unit,
-    onClick: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val warning = if (travel.hoursModified) " ⚠️" else ""
@@ -689,10 +1394,9 @@ private fun TravelRowCard(
 
     Card(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth().clickable { onClick() }
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -704,27 +1408,34 @@ private fun TravelRowCard(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onEdit) { Text("✏️") }
+                    TextButton(onClick = onDelete) { Text("🗑️") }
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Horas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Fact.", style = MaterialTheme.typography.labelMedium)
                     Checkbox(
                         checked = travel.isInvoiced,
                         onCheckedChange = { onToggleInvoiced(it) },
                         colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                     )
-                    TextButton(onClick = onDelete) { Text("🗑️") }
                 }
             }
 
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Horas imputadas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
-                Text("€ ${formatCurrencyNumber(travel.billingExpected)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            }
+            Text(
+                "€ ${formatCurrencyNumber(travel.billingExpected)}",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
-}
-
-private fun unifiedExportFileName(): String {
-    val stamp = java.text.SimpleDateFormat("yyyy_MM", java.util.Locale.getDefault()).format(java.util.Date())
-    return "AXIS_export_$stamp.csv"
 }
 
 private fun exportUnifiedCsvIO(
