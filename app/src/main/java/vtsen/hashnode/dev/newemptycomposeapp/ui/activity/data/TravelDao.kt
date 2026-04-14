@@ -24,11 +24,17 @@ interface TravelDao {
     @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
     suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
 
-    // ✅ NUEVO: Marcar como facturado / no facturado
     @Query("UPDATE travels SET isInvoiced = :isInvoiced WHERE id = :id")
     suspend fun setInvoiced(id: String, isInvoiced: Boolean)
 
-    // Cierre definitivo con snapshots (como lo tenías)
+    // ✅ NUEVO: borrar viaje (paradas se borran por CASCADE)
+    @Query("DELETE FROM travels WHERE id = :id")
+    suspend fun deleteTravel(id: String)
+
+    // ✅ NUEVO: editar KM inicial
+    @Query("UPDATE travels SET kmStart = :kmStart WHERE id = :id")
+    suspend fun updateKmStart(id: String, kmStart: Int)
+
     @Query(
         """
         UPDATE travels
