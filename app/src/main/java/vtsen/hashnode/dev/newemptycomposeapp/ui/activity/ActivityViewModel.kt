@@ -208,7 +208,25 @@ class ActivityViewModel(
         return true
     }
 
-    fun prepareExport() {
-        // compat
+   
+un prepareExport() {
+    // compat
+}
+
+// ✅ PÉGALO AQUÍ (antes del último cierre de clase)
+fun deleteTravel(travelId: String) {
+    viewModelScope.launch {
+        repository.deleteTravel(travelId)
     }
+}
+
+fun updateKmStart(kmStart: Int): Boolean {
+    val current = currentTravel.value ?: return false
+    if (kmStart <= 0) return false
+    viewModelScope.launch {
+        repository.updateKmStart(current.id, kmStart)
+    }
+    return true
+}
+
 }
