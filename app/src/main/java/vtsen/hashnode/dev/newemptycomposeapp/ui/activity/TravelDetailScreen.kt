@@ -2,14 +2,7 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -43,13 +36,16 @@ fun TravelDetailScreen(
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val stops by viewModel.stopsForCurrentTravel.collectAsStateWithLifecycle()
 
-    var kmEnd by rememberSaveable { mutableStateOf("") }
+    var kmStartText by rememberSaveable { mutableStateOf("") }
+    var kmEndText by rememberSaveable { mutableStateOf("") }
+
     var hoursDraftText by rememberSaveable { mutableStateOf("") }
     var hoursCalculatedText by rememberSaveable { mutableStateOf("") }
     var hoursImputedText by rememberSaveable { mutableStateOf("") }
+
     var errorMessage by rememberSaveable { mutableStateOf<String?>(null) }
 
-    // ---- Paradas ----
+    // Stops dialog state
     var showAddStop by remember { mutableStateOf(false) }
     var showEditStop by remember { mutableStateOf(false) }
     var editStopId by remember { mutableStateOf<String?>(null) }
@@ -57,64 +53,23 @@ fun TravelDetailScreen(
     var stopKmText by remember { mutableStateOf("") }
     var stopWarning by remember { mutableStateOf<String?>(null) }
 
+    // Delete travel confirm
+    var showDeleteTravelConfirm by remember { mutableStateOf(false) }
+
     val formatter = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
     if (travel == null) {
         LaunchedEffect(Unit) { onCloseTravel() }
         return
     }
+    val t = travel!!
 
-    val startTimeStr = formatter.format(Date(travel!!.startTimestamp))
-
-    // ===== MODELO A =====
-    val COSTE_KM_OPERATIVO = settings.costeKmOperativo
-    val COSTE_DIETA_FIJA = settings.costeDietaFija
-    val PORC_BENEF_EXIGIDO_A = settings.porcBenefExigidoA
-    val COSTE_HORA_ALEJANDRO = settings.costeHoraAlejandro
-
-    // ===== MODELO EMPRESA =====
-    val costeEmpresaAnual =
-        (settings.salarioBrutoAnual * (1.0 + settings.cargasEmpresa)) +
-            settings.overheadAnual
-    val horasFacturables = settings.horasAnuales * settings.utilizacion
-    val costeHoraEmpresaX = costeEmpresaAnual / horasFacturables
-    val tarifaObjetivoY = costeHoraEmpresaX * (1.0 + settings.margenEmpresa)
-
-    LaunchedEffect(travel!!.id) {
-        hoursDraftText = travel!!.hoursDraft?.toString() ?: ""
-        hoursImputedText =
-            travel!!.hoursImputed?.toString()
-                ?: travel!!.hoursDraft?.toString().orEmpty()
-        hoursCalculatedText = travel!!.hoursCalculatedSnapshot?.toString() ?: ""
-    }
-
-    // ===== Cálculo horas sugeridas =====
-    val kmEndInt = kmEnd.toIntOrNull()
-    val kmDone =
-        if (kmEndInt != null) max(0, kmEndInt - travel!!.kmStart) else null
-
-    val suggestedHours: Double? =
-        remember(kmDone, travel!!.billingExpected, travel!!.hasDiet, settings) {
-            if (kmDone == null) return@remember null
-
-            val facturacion = travel!!.billingExpected
-            val costeMaxPermitido = facturacion / (1.0 + PORC_BENEF_EXIGIDO_A)
-
-            val costeKm = kmDone * COSTE_KM_OPERATIVO
-            val costeDieta = if (travel!!.hasDiet) COSTE_DIETA_FIJA else 0.0
-
-            val presupuestoHoras = costeMaxPermitido - costeKm - costeDieta
-            val horasRaw = presupuestoHoras / COSTE_HORA_ALEJANDRO
-            val horasClamped = max(0.0, horasRaw)
-
-            round(horasClamped * 10.0) / 10.0
-        }
-
-    LaunchedEffect(suggestedHours) {
-        if (suggestedHours != null) {
-            hoursCalculatedText =
-                String.format(Locale.US, "%.1f", suggestedHours)
-        }
+    LaunchedEffect(t.id) {
+        kmStartText = t.kmStart.toString()
+        kmEndText = t.kmEnd?.toString() ?: ""
+        hoursDraftText = t.hoursDraft?.toString() ?: ""
+        hoursImputedText = t.hoursImputed?.toString() ?: (t.hoursDraft?.toString() ?: "")
+        hoursCalculatedText = t.hoursCalculatedSnapshot?.toString() ?: ""
     }
 
     fun openMaps(query: String) {
@@ -122,8 +77,39 @@ fun TravelDetailScreen(
         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
     }
 
-    fun parseStopKm(): Int? =
-        stopKmText.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()
+    fun parseStopKm(): Int? = stopKmText.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()
+
+    // ===== Modelo A (como lo tienes ahora) =====
+    val COSTE_KM_OPERATIVO = settings.costeKmOperativo
+    val COSTE_DIETA_FIJA = settings.costeDietaFija
+    val PORC_BENEF_EXIGIDO_A = settings.porcBenefExigidoA
+    val COSTE_HORA_ALEJANDRO = settings.costeHoraAlejandro
+
+    val kmEndInt = kmEndText.toIntOrNull()
+    val kmStartInt = kmStartText.toIntOrNull() ?: t.kmStart
+    val kmDone = if (kmEndInt != null) max(0, kmEndInt - kmStartInt) else null
+
+    val suggestedHours: Double? = remember(kmDone, t.billingExpected, t.hasDiet, settings) {
+        if (kmDone == null) return@remember null
+
+        val facturacion = t.billingExpected
+        val costeMaxPermitido = facturacion / (1.0 + PORC_BENEF_EXIGIDO_A)
+
+        val costeKm = kmDone * COSTE_KM_OPERATIVO
+        val costeDieta = if (t.hasDiet) COSTE_DIETA_FIJA else 0.0
+
+        val presupuestoHoras = costeMaxPermitido - costeKm - costeDieta
+        val horasRaw = presupuestoHoras / COSTE_HORA_ALEJANDRO
+        val horasClamped = max(0.0, horasRaw)
+
+        round(horasClamped * 10.0) / 10.0
+    }
+
+    LaunchedEffect(suggestedHours) {
+        if (suggestedHours != null) {
+            hoursCalculatedText = String.format(Locale.US, "%.1f", suggestedHours)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -132,7 +118,15 @@ fun TravelDetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.errorContainer,
                     titleContentColor = MaterialTheme.colorScheme.onErrorContainer
-                )
+                ),
+                actions = {
+                    // Solo EN CURSO
+                    if (t.status == TravelStatus.IN_PROGRESS) {
+                        TextButton(onClick = { showDeleteTravelConfirm = true }) {
+                            Text("🗑️", fontSize = MaterialTheme.typography.titleLarge.fontSize)
+                        }
+                    }
+                }
             )
         }
     ) { padding ->
@@ -145,24 +139,59 @@ fun TravelDetailScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // ================= CONTEXTO =================
+            // CONTEXTO
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Contexto", fontWeight = FontWeight.Bold)
-                    Text("📍 Origen: ${travel!!.origin}")
-                    Text("🏁 Destino: ${travel!!.destination}")
-                    Text("⏱️ Salida: $startTimeStr")
-                    Text("🚗 KM inicio: ${travel!!.kmStart}")
-                    Text("💶 Facturación: ${String.format(Locale.getDefault(), "%.2f", travel!!.billingExpected)} €")
+                    Text("📍 Origen: ${t.origin}")
+                    Text("🏁 Destino: ${t.destination}")
+                    Text("📝 Ref: ${t.description}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("⏱️ Salida: ${formatter.format(Date(t.startTimestamp))}")
+                    Text("💶 Facturación: ${String.format(Locale.getDefault(), "%.2f", t.billingExpected)} €")
+                    Text("🍽️ Dieta: ${if (t.hasDiet) "SI" else "NO"}")
                 }
             }
 
-            // ================= PARADAS =================
+            // KM inicial editable (EN CURSO)
+            Card {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Kilometraje", fontWeight = FontWeight.Bold)
+
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = kmStartText,
+                            onValueChange = { kmStartText = it.filter(Char::isDigit) },
+                            label = { Text("KM inicial (editable)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.weight(1f),
+                            enabled = (t.status == TravelStatus.IN_PROGRESS)
+                        )
+                        Button(
+                            onClick = {
+                                val newKmStart = kmStartText.toIntOrNull() ?: -1
+                                val ok = viewModel.updateKmStart(newKmStart)
+                                errorMessage = if (ok) null else "KM inicial inválido."
+                            },
+                            enabled = (t.status == TravelStatus.IN_PROGRESS)
+                        ) { Text("Guardar") }
+                    }
+
+                    OutlinedTextField(
+                        value = kmEndText,
+                        onValueChange = { kmEndText = it.filter(Char::isDigit) },
+                        label = { Text("KM llegada") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
+            // PARADAS (EN CURSO)
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Paradas intermedias", fontWeight = FontWeight.Bold)
 
-                    if (travel!!.status == TravelStatus.IN_PROGRESS) {
+                    if (t.status == TravelStatus.IN_PROGRESS) {
                         Button(
                             onClick = {
                                 stopPlace = ""
@@ -171,23 +200,15 @@ fun TravelDetailScreen(
                                 showAddStop = true
                             },
                             modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("📍 AÑADIR PARADA", fontWeight = FontWeight.Bold)
-                        }
+                        ) { Text("📍 AÑADIR PARADA", fontWeight = FontWeight.Bold) }
                     }
 
                     if (stops.isEmpty()) {
                         Text("No hay paradas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         stops.forEach { s ->
-                            val time =
-                                formatter.format(Date(s.timestamp))
-
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                                )
-                            ) {
+                            val time = formatter.format(Date(s.timestamp))
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                                 Row(
                                     Modifier.padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -201,11 +222,9 @@ fun TravelDetailScreen(
                                         )
                                     }
 
-                                    IconButton(onClick = { openMaps(s.place) }) {
-                                        Text("🗺️")
-                                    }
+                                    IconButton(onClick = { openMaps(s.place) }) { Text("🗺️") }
 
-                                    if (travel!!.status == TravelStatus.IN_PROGRESS) {
+                                    if (t.status == TravelStatus.IN_PROGRESS) {
                                         IconButton(onClick = {
                                             editStopId = s.id
                                             stopPlace = s.place
@@ -214,9 +233,7 @@ fun TravelDetailScreen(
                                             showEditStop = true
                                         }) { Text("✏️") }
 
-                                        IconButton(onClick = { viewModel.deleteStop(s.id) }) {
-                                            Text("🗑️")
-                                        }
+                                        IconButton(onClick = { viewModel.deleteStop(s.id) }) { Text("🗑️") }
                                     }
                                 }
                             }
@@ -225,23 +242,30 @@ fun TravelDetailScreen(
                 }
             }
 
-            // ================= CIERRE =================
+            // HORAS + CIERRE
             Card {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
 
-                    OutlinedTextField(
-                        value = kmEnd,
-                        onValueChange = { kmEnd = it },
-                        label = { Text("KM de llegada") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedTextField(
+                            value = hoursDraftText,
+                            onValueChange = { hoursDraftText = it },
+                            label = { Text("Horas Draft") },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                        )
+                        Button(onClick = {
+                            val draft = hoursDraftText.replace(',', '.').toDoubleOrNull()
+                            val ok = viewModel.updateHoursDraft(draft)
+                            errorMessage = if (ok) null else "Horas draft inválidas."
+                        }) { Text("Guardar") }
+                    }
 
                     OutlinedTextField(
                         value = hoursCalculatedText,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Horas sugeridas (Modelo 35%)") },
+                        label = { Text("Horas sugeridas (Modelo A)") },
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -249,71 +273,71 @@ fun TravelDetailScreen(
                         value = hoursImputedText,
                         onValueChange = { hoursImputedText = it },
                         label = { Text("Horas imputadas") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
 
-                    errorMessage?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
+                    errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
                     Button(
                         onClick = {
+                            val endKm = kmEndText.toIntOrNull() ?: -1
+                            val calculated = hoursCalculatedText.replace(',', '.').toDoubleOrNull() ?: -1.0
+                            val imputed = hoursImputedText.replace(',', '.').toDoubleOrNull() ?: -1.0
+
+                            if (calculated <= 0.0) {
+                                errorMessage = "Introduce KM fin para calcular snapshot."
+                                return@Button
+                            }
+
                             val ok = viewModel.closeCurrentTravel(
-                                kmEnd = kmEnd.toIntOrNull() ?: -1,
-                                hoursImputed = hoursImputedText.replace(',', '.').toDoubleOrNull() ?: -1.0,
-                                hoursCalculated = hoursCalculatedText.replace(',', '.').toDoubleOrNull() ?: -1.0
+                                kmEnd = endKm,
+                                hoursImputed = imputed,
+                                hoursCalculated = calculated
                             )
-                            if (ok) onCloseTravel()
-                            else errorMessage = "Revisa KM fin y horas."
+
+                            if (ok) onCloseTravel() else errorMessage = "Revisa KM fin y horas."
                         },
                         modifier = Modifier.fillMaxWidth(),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
-                        Text("CERRAR VIAJE", fontWeight = FontWeight.Bold)
+                        Text("CERRAR VIAJE DEFINITIVAMENTE", fontWeight = FontWeight.Bold)
                     }
                 }
             }
         }
     }
 
-    // ================= DIALOGOS =================
+    // Dialog añadir parada
     if (showAddStop) {
         AlertDialog(
             onDismissRequest = { showAddStop = false },
             confirmButton = {
                 TextButton(onClick = {
                     val km = parseStopKm()
-                    stopWarning = viewModel.validateStopKm(km)
+                    stopWarning = viewModel.validateStopKm(km) // avisa, no bloquea
                     val ok = viewModel.addStop(stopPlace, km)
                     if (ok) showAddStop = false
                 }) { Text("Guardar") }
             },
-            dismissButton = {
-                TextButton(onClick = { showAddStop = false }) { Text("Cancelar") }
-            },
+            dismissButton = { TextButton(onClick = { showAddStop = false }) { Text("Cancelar") } },
             title = { Text("Nueva parada") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = stopPlace,
-                        onValueChange = { stopPlace = it },
-                        label = { Text("Lugar / destino") }
-                    )
+                    OutlinedTextField(value = stopPlace, onValueChange = { stopPlace = it }, label = { Text("Lugar/destino") })
                     OutlinedTextField(
                         value = stopKmText,
                         onValueChange = { stopKmText = it.filter(Char::isDigit) },
                         label = { Text("KM odómetro (opcional)") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
-                    stopWarning?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
+                    stopWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             }
         )
     }
 
+    // Dialog editar parada
     if (showEditStop && editStopId != null) {
         AlertDialog(
             onDismissRequest = { showEditStop = false },
@@ -325,26 +349,38 @@ fun TravelDetailScreen(
                     if (ok) showEditStop = false
                 }) { Text("Guardar cambios") }
             },
-            dismissButton = {
-                TextButton(onClick = { showEditStop = false }) { Text("Cancelar") }
-            },
+            dismissButton = { TextButton(onClick = { showEditStop = false }) { Text("Cancelar") } },
             title = { Text("Editar parada") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = stopPlace,
-                        onValueChange = { stopPlace = it },
-                        label = { Text("Lugar / destino") }
-                    )
+                    OutlinedTextField(value = stopPlace, onValueChange = { stopPlace = it }, label = { Text("Lugar/destino") })
                     OutlinedTextField(
                         value = stopKmText,
                         onValueChange = { stopKmText = it.filter(Char::isDigit) },
-                        label = { Text("KM odómetro (opcional)") }
+                        label = { Text("KM odómetro (opcional)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
-                    stopWarning?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
+                    stopWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
+            }
+        )
+    }
+
+    // Confirm borrar viaje
+    if (showDeleteTravelConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteTravelConfirm = false },
+            title = { Text("Eliminar viaje") },
+            text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteTravel(t.id)
+                    showDeleteTravelConfirm = false
+                    onCloseTravel()
+                }) { Text("Eliminar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteTravelConfirm = false }) { Text("Cancelar") }
             }
         )
     }
