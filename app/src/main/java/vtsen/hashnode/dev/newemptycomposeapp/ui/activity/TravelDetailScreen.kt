@@ -10,9 +10,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -25,7 +41,7 @@ import kotlin.math.max
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.settings.SettingsViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun TravelDetailScreen(
     viewModel: ActivityViewModel,
@@ -135,11 +151,14 @@ fun TravelDetailScreen(
                     Text("Paradas intermedias", fontWeight = FontWeight.Bold)
 
                     if (t.status == TravelStatus.IN_PROGRESS) {
-                        Button(onClick = {
-                            stopPlace = ""
-                            stopKmText = ""
-                            showAddStop = true
-                        }, modifier = Modifier.fillMaxWidth()) {
+                        Button(
+                            onClick = {
+                                stopPlace = ""
+                                stopKmText = ""
+                                showAddStop = true
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text("📍 AÑADIR PARADA", fontWeight = FontWeight.Bold)
                         }
                     }
@@ -157,7 +176,10 @@ fun TravelDetailScreen(
                                     Column(Modifier.weight(1f)) {
                                         Text("📍 ${dtFmt.format(Date(s.timestamp))}", fontWeight = FontWeight.SemiBold)
                                         Text(s.place)
-                                        Text("KM: ${s.kmOdometer?.toString() ?: "—"}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "KM: ${s.kmOdometer?.toString() ?: "—"}",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                     if (t.status == TravelStatus.IN_PROGRESS) {
                                         TextButton(onClick = {
@@ -202,7 +224,7 @@ fun TravelDetailScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    // Dirección llegada con botón 📍 (igual que inicio)
+                    // Dirección llegada con botón 📍 (mismo comportamiento que inicio)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = endAddressText,
