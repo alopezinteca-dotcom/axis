@@ -11,7 +11,7 @@ import androidx.room.TypeConverters
         TravelEntity::class,
         TravelStopEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -21,8 +21,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun travelStopDao(): TravelStopDao
 
     companion object {
-        @Volatile
-        private var instance: AppDatabase? = null
+        @Volatile private var instance: AppDatabase? = null
 
         fun getDatabase(context: Context): AppDatabase {
             return instance ?: synchronized(this) {
@@ -31,7 +30,6 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "axis.db"
                 )
-                    // DEV: recrea DB si cambia schema
                     .fallbackToDestructiveMigration()
                     .build()
 
