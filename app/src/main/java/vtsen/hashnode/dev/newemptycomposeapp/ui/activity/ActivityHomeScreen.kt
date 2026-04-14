@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -65,9 +66,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisUnifiedCsvExporter
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportPreferences
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportUtils
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.TravelCsvExporter
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
@@ -90,11 +91,13 @@ fun ActivityHomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var isExporting by remember { mutableStateOf(false) }
 
-    
     val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
     val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
 
+    // Confirmación borrado viaje
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var travelToDeleteId by remember { mutableStateOf<String?>(null) }
 
     // =========================
     // 1) PERIODO (DataStore)
@@ -119,12 +122,13 @@ fun ActivityHomeScreen(
         }
     }
 
-LaunchedEffect(fromMillis, toMillis) {
-    if (fromMillis != 0L && toMillis != 0L) {
-        viewModel.setStopsRange(fromMillis, toMillis)
+    // Muy importante: cargamos las paradas del periodo en el VM
+    LaunchedEffect(fromMillis, toMillis) {
+        if (fromMillis != 0L && toMillis != 0L) {
+            viewModel.setStopsRange(fromMillis, toMillis)
+        }
     }
-}
-    
+
     val fromDate = remember(fromMillis) {
         if (fromMillis == 0L) LocalDate.now()
         else BillingPeriodStore.millisToLocalDate(fromMillis, zone)
@@ -136,8 +140,6 @@ LaunchedEffect(fromMillis, toMillis) {
 
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var travelToDeleteId by remember { mutableStateOf<String?>(null) }
 
     val fromPickerState = rememberDatePickerState(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
@@ -160,7 +162,6 @@ LaunchedEffect(fromMillis, toMillis) {
 
     var showCalendarManager by remember { mutableStateOf(false) }
 
-    // Dialogs añadir festivo/vacaciones
     var showAddHoliday by remember { mutableStateOf(false) }
     var showAddVacation by remember { mutableStateOf(false) }
     var holidayDesc by remember { mutableStateOf("") }
@@ -177,7 +178,7 @@ LaunchedEffect(fromMillis, toMillis) {
     )
 
     // =========================
-    // 3) VIAJES FILTRADOS POR PERIODO
+    // 3) VIAJES DEL PERIODO
     // =========================
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
         derivedStateOf {
@@ -185,29 +186,22 @@ LaunchedEffect(fromMillis, toMillis) {
             else allTravels.filter { it.startTimestamp in fromMillis..toMillis }
         }
     }
-// =========================
-// 3.1) DÍAS + AGRUPACIONES PARA TIMELINE (por día)
-// =========================
-val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
 
-val daysInRange = remember(fromDate, toDate) {
-    datesBetweenInclusive(fromDate, toDate) // helper al final del archivo
-}
+    // =========================
+    // 3.1) Timeline por día (ASC) + agrupaciones
+    // =========================
+    val daysInRange = remember(fromDate, toDate) { datesBetweenInclusive(fromDate, toDate) }
 
-// Viajes agrupados por día
-val travelsByDay = remember(periodTravels, zone) {
-    periodTravels.groupBy { t ->
-        BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone)
+    val travelsByDay = remember(periodTravels, zone) {
+        periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone) }
     }
-}
 
-// Paradas agrupadas por día (solo contador)
-val stopsCountByDay = remember(stopsInPeriod, zone) {
-    stopsInPeriod
-        .groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
-        .mapValues { it.value.size }
-}
- 
+    val stopsCountByDay = remember(stopsInPeriod, zone) {
+        stopsInPeriod
+            .groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
+            .mapValues { it.value.size }
+    }
+
     // =========================
     // 4) KPI REAL PERIODO
     // =========================
@@ -264,15 +258,25 @@ val stopsCountByDay = remember(stopsInPeriod, zone) {
     }
 
     // =========================
-    // 5) Export CSV
+    // 5) Export CSV ÚNICO (TRAVEL + STOP)
     // =========================
     fun triggerExport(folderUri: Uri) {
         if (isExporting) return
         isExporting = true
-        val fileName = ExportUtils.currentMonthFileName()
+
+        val fileName = unifiedExportFileName()
+
         coroutineScope.launch {
             try {
-                withContext(Dispatchers.IO) { exportCsvIO(context, folderUri, periodTravels) }
+                withContext(Dispatchers.IO) {
+                    exportUnifiedCsvIO(
+                        context = context,
+                        folderUri = folderUri,
+                        fileName = fileName,
+                        travels = periodTravels,
+                        stops = stopsInPeriod
+                    )
+                }
                 snackbarHostState.showSnackbar("✅ Exportado: $fileName")
             } catch (e: Exception) {
                 snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
@@ -292,7 +296,7 @@ val stopsCountByDay = remember(stopsInPeriod, zone) {
     }
 
     // =========================
-    // UI: Diálogo “Gestión calendario”
+    // UI: Gestión calendario (📅)
     // =========================
     if (showCalendarManager) {
         CalendarManagementDialog(
@@ -312,26 +316,28 @@ val stopsCountByDay = remember(stopsInPeriod, zone) {
         )
     }
 
+    // Confirm borrar viaje (también cerrados)
+    if (showDeleteConfirm && travelToDeleteId != null) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Eliminar viaje") },
+            text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deleteTravel(travelToDeleteId!!)
+                    travelToDeleteId = null
+                    showDeleteConfirm = false
+                }) { Text("Eliminar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
     // =========================
-    // Scaffold con TopAppBar + 📅
+    // Scaffold principal
     // =========================
-if (showDeleteConfirm && travelToDeleteId != null) {
-    AlertDialog(
-        onDismissRequest = { showDeleteConfirm = false },
-        title = { Text("Eliminar viaje") },
-        text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
-        confirmButton = {
-            TextButton(onClick = {
-                viewModel.deleteTravel(travelToDeleteId!!)
-                travelToDeleteId = null
-                showDeleteConfirm = false
-            }) { Text("Eliminar") }
-        },
-        dismissButton = {
-            TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") }
-        }
-    )
-}    
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -514,20 +520,20 @@ if (showDeleteConfirm && travelToDeleteId != null) {
                 KpiLine("Días laborables", diasLaborables.toString(), "L-V menos festivos y vacaciones")
                 KpiLine("Total facturar", formatCurrency(totalFacturarObjetivo), "350 € × día laborable")
                 KpiLine("Horas objetivo", formatHours(horasObjetivo), "8 h × día laborable")
-                KpiLine("Total km periodo", "$kmPeriodo km", "cerrados (por ahora)")
+                KpiLine("Total km periodo", "$kmPeriodo km", "cerrados")
 
                 SectionDivider()
 
                 BlockTitle("Real (Periodo)")
-                KpiLine("Total estimado periodo", formatCurrency(totalEstimadoPeriodo), "suma de viajes del rango")
-                KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo viajes cerrados")
+                KpiLine("Total estimado periodo", formatCurrency(totalEstimadoPeriodo), "suma viajes del rango")
+                KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo cerrados")
                 KpiLine("Δ Horas (objetivo - imputadas)", formatHours(deltaHoras), "positivo = faltan horas")
 
                 SectionDivider()
 
                 BlockTitle("Anual + Tesorería")
-                KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 de enero")
-                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos los viajes no facturados")
+                KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 enero")
+                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos no facturados")
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -550,94 +556,96 @@ if (showDeleteConfirm && travelToDeleteId != null) {
                 }
             }
 
-           // DERECHA: TIMELINE POR DÍA (ASC)
-Column(
-    modifier = Modifier.weight(0.65f).fillMaxHeight(),
-    verticalArrangement = Arrangement.spacedBy(12.dp)
-) {
-    Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            // DERECHA: TIMELINE POR DÍA (ASC)
+            Column(
+                modifier = Modifier.weight(0.65f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        items(daysInRange) { day ->
-
-            // Cabecera del día
-            DayHeader(day = day, dateFormatter = dateFormatter)
-
-            // 📍 Solo número de paradas del día
-            val stopCount = stopsCountByDay[day] ?: 0
-            if (stopCount > 0) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                    modifier = Modifier.fillMaxWidth()
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    Row(
-                        Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("📍 $stopCount", fontWeight = FontWeight.Bold)
+                    items(daysInRange) { day ->
+
+                        DayHeader(day = day, dateFormatter = dateFormatter)
+
+                        // 📍 Solo número de paradas del día
+                        val stopCount = stopsCountByDay[day] ?: 0
+                        if (stopCount > 0) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("📍 $stopCount", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        // EN CURSO si corresponde al día
+                        val current = currentTravel
+                        val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDate(it, zone) }
+                        if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onCurrentTravelClick() }
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text("${current.origin} → ${current.destination}", style = MaterialTheme.typography.titleMedium)
+                                    Text("KM inicio: ${current.kmStart} | Draft: ${current.hoursDraft ?: 0.0}h")
+                                }
+                            }
+                        }
+
+                        // Viajes cerrados del día
+                        val travelsToday = (travelsByDay[day] ?: emptyList())
+                            .filter { it.status == TravelStatus.CLOSED }
+                            .sortedBy { it.startTimestamp }
+
+                        if (stopCount == 0 && (currentDay != day) && travelsToday.isEmpty()) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(Modifier.padding(12.dp)) {
+                                    Text("Sin viajes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        } else {
+                            travelsToday.forEach { t ->
+                                TravelRowCard(
+                                    travel = t,
+                                    zone = zone,
+                                    dateFormatter = dateFormatter,
+                                    onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
+                                    onClick = { onEditTravelClick(t.id) },
+                                    onDelete = {
+                                        travelToDeleteId = t.id
+                                        showDeleteConfirm = true
+                                    }
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(6.dp))
                     }
                 }
             }
-
-            // EN CURSO si pertenece a este día
-            val current = currentTravel
-            val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDate(it, zone) }
-            if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onCurrentTravelClick() }
-                ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("🟢 EN CURSO (tocar para continuar)", fontWeight = FontWeight.Bold)
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("${current.origin} → ${current.destination}", style = MaterialTheme.typography.titleMedium)
-                        Text("KM inicio: ${current.kmStart} | Draft: ${current.hoursDraft ?: 0.0}h")
-                    }
-                }
-            }
-
-            // Viajes cerrados del día (orden ascendente)
-            val travelsToday = (travelsByDay[day] ?: emptyList())
-                .filter { it.status == TravelStatus.CLOSED }
-                .sortedBy { it.startTimestamp }
-
-            // Día vacío
-            if (stopCount == 0 && (currentDay != day) && travelsToday.isEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(Modifier.padding(12.dp)) {
-                        Text("Sin viajes", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else {
-                travelsToday.forEach { t ->
-                    TravelRowCard(
-    travel = t,
-    zone = zone,
-    dateFormatter = dateFormatter,
-    onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
-    onClick = { onEditTravelClick(t.id) },
-    onDelete = {
-        travelToDeleteId = t.id
-        showDeleteConfirm = true
-    }
-)
-
-
-            Spacer(Modifier.height(6.dp))
         }
     }
 }
 
 /* =========================
-   Helpers (KPI + export)
+   Helpers UI + Export + Date
    ========================= */
 
 @Composable
@@ -684,6 +692,7 @@ private fun TravelRowCard(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -713,10 +722,21 @@ private fun TravelRowCard(
     }
 }
 
-private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEntity>) {
-    val resolver = context.contentResolver
-    val fileName = ExportUtils.currentMonthFileName()
+private fun unifiedExportFileName(): String {
+    val stamp = java.text.SimpleDateFormat("yyyy_MM", java.util.Locale.getDefault()).format(java.util.Date())
+    return "AXIS_export_$stamp.csv"
+}
 
+private fun exportUnifiedCsvIO(
+    context: Context,
+    folderUri: Uri,
+    fileName: String,
+    travels: List<TravelEntity>,
+    stops: List<TravelStopEntity>
+) {
+    val resolver = context.contentResolver
+
+    // borrar si existe
     resolver.query(
         DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, DocumentsContract.getTreeDocumentId(folderUri)),
         arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
@@ -734,11 +754,11 @@ private fun exportCsvIO(context: Context, folderUri: Uri, travels: List<TravelEn
     }
 
     val newFileUri = DocumentsContract.createDocument(resolver, folderUri, "text/csv", fileName)
-        ?: throw IllegalStateException("No se pudo crear el archivo en Drive")
+        ?: throw IllegalStateException("No se pudo crear el archivo de export en Drive")
 
     resolver.openOutputStream(newFileUri)?.use { stream ->
-        TravelCsvExporter.writeCsv(stream, travels)
-    } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento")
+        AxisUnifiedCsvExporter.writeCsv(stream, travels, stops)
+    } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento (export)")
 }
 
 private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
@@ -784,6 +804,7 @@ private fun expandVacationDates(vacations: List<Vacation>, periodFrom: LocalDate
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
 private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
+
 private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
     if (to.isBefore(from)) return emptyList()
     val out = ArrayList<LocalDate>()
