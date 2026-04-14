@@ -3,13 +3,19 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlin.math.abs
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopRepository
 
 data class ParamSnapshots(
     val costeKmOperativo: Double,
@@ -21,7 +27,8 @@ data class ParamSnapshots(
 )
 
 class ActivityViewModel(
-    private val repository: TravelRepository
+    private val repository: TravelRepository,
+    private val stopRepository: TravelStopRepository
 ) : ViewModel() {
 
     val allTravels: StateFlow<List<TravelEntity>> =
@@ -44,6 +51,54 @@ class ActivityViewModel(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList()
         )
+
+    // ✅ Stops del viaje en curso
+    val stopsForCurrentTravel: StateFlow<List<TravelStopEntity>> =
+        currentTravel.flatMapLatest { t ->
+            if (t == null) flowOf(emptyList())
+            else stopRepository.stopsForTravel(t.id)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    // ✅ Stops del periodo (para timeline por días)
+    private val stopRange = MutableStateFlow(0L to 0L)
+
+    val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
+        stopRange.flatMapLatest { (from, to) ->
+            if (from == 0L || to == 0L) flowOf(emptyList())
+            else stopRepository.stopsInRange(from, to)
+        }.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
+    fun setStopsRange(fromMillis: Long, toMillis: Long) {
+        stopRange.value = fromMillis to toMillis
+    }
+
+    // ✅ Añadir parada (requiere viaje en curso)
+    fun addStop(place: String, km: Int?): Boolean {
+        val current = currentTravel.value ?: return false
+        if (place.isBlank()) return false
+        if (km != null && km < 0) return false
+
+        viewModelScope.launch {
+            stopRepository.addStop(
+                travelId = current.id,
+                place = place,
+                km = km
+            )
+        }
+        return true
+    }
+
+    fun deleteStop(stopId: String) {
+        viewModelScope.launch { stopRepository.deleteStop(stopId) }
+    }
 
     fun startTravel(
         origin: String,
@@ -83,14 +138,13 @@ class ActivityViewModel(
         return true
     }
 
-    // ✅ NUEVO (V2): marcar/desmarcar como facturado (manual)
+    // ✅ Facturado (manual)
     fun setFacturado(travelId: String, isInvoiced: Boolean) {
         viewModelScope.launch {
             repository.setInvoiced(travelId, isInvoiced)
         }
     }
 
-    // Compatibilidad: si alguien llama sin snapshots, usamos defaults
     fun closeCurrentTravel(
         kmEnd: Int,
         hoursImputed: Double,
@@ -104,12 +158,7 @@ class ActivityViewModel(
             costeHoraEmpresaX = 36.65,
             tarifaObjetivoY = 42.14
         )
-        return closeCurrentTravelWithSnapshots(
-            kmEnd = kmEnd,
-            hoursImputed = hoursImputed,
-            hoursCalculated = hoursCalculated,
-            snaps = defaults
-        )
+        return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
     }
 
     fun closeCurrentTravelWithSnapshots(
@@ -150,6 +199,6 @@ class ActivityViewModel(
     }
 
     fun prepareExport() {
-        // Intencionadamente vacío (compat)
+        // compat
     }
 }
