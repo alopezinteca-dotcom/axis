@@ -17,9 +17,18 @@ class TravelRepository(
         travelDao.updateHoursDraft(id, hoursDraft)
     }
 
-    // ✅ NUEVO
     suspend fun setInvoiced(id: String, isInvoiced: Boolean) {
         travelDao.setInvoiced(id, isInvoiced)
+    }
+
+    // ✅ NUEVO
+    suspend fun deleteTravel(id: String) {
+        travelDao.deleteTravel(id)
+    }
+
+    // ✅ NUEVO
+    suspend fun updateKmStart(id: String, kmStart: Int) {
+        travelDao.updateKmStart(id, kmStart)
     }
 
     suspend fun closeTravel(
