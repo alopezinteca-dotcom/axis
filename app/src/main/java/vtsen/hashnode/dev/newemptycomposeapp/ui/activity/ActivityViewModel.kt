@@ -3,7 +3,6 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlin.math.abs
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -32,74 +31,94 @@ class ActivityViewModel(
 ) : ViewModel() {
 
     val allTravels: StateFlow<List<TravelEntity>> =
-        repository.allTravels.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        repository.allTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val currentTravel: StateFlow<TravelEntity?> =
-        repository.currentTravel.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = null
-        )
+        repository.currentTravel.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     val exportData: StateFlow<List<TravelEntity>> =
-        repository.closedTravels.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        repository.closedTravels.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ✅ Stops del viaje en curso
+    // -------- Stops del viaje en curso --------
     val stopsForCurrentTravel: StateFlow<List<TravelStopEntity>> =
         currentTravel.flatMapLatest { t ->
-            if (t == null) flowOf(emptyList())
-            else stopRepository.stopsForTravel(t.id)
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+            if (t == null) flowOf(emptyList()) else stopRepository.stopsForTravel(t.id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // ✅ Stops del periodo (para timeline por días)
+    // -------- Stops del periodo (para timeline por día) --------
     private val stopRange = MutableStateFlow(0L to 0L)
 
     val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
         stopRange.flatMapLatest { (from, to) ->
             if (from == 0L || to == 0L) flowOf(emptyList())
             else stopRepository.stopsInRange(from, to)
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
         stopRange.value = fromMillis to toMillis
     }
 
-    // ✅ Añadir parada (requiere viaje en curso)
-    fun addStop(place: String, km: Int?): Boolean {
-        val current = currentTravel.value ?: return false
+    /**
+     * Devuelve un aviso si el km es sospechoso, pero NO bloquea.
+     */
+    fun validateStopKm(kmOdometer: Int?): String? {
+        val t = currentTravel.value ?: return null
+        if (kmOdometer == null) return null
+
+        val lastKm = stopsForCurrentTravel.value.lastOrNull { it.kmOdometer != null }?.kmOdometer
+        return when {
+            kmOdometer < t.kmStart ->
+                "⚠️ El km de la parada ($kmOdometer) es menor que el km inicial del viaje (${t.kmStart})."
+            lastKm != null && kmOdometer < lastKm ->
+                "⚠️ El km de la parada ($kmOdometer) es menor que el km de la parada anterior ($lastKm)."
+            else -> null
+        }
+    }
+
+    fun addStop(place: String, kmOdometer: Int?): Boolean {
+        val t = currentTravel.value ?: return false
+        if (t.status != TravelStatus.IN_PROGRESS) return false
         if (place.isBlank()) return false
-        if (km != null && km < 0) return false
+        if (kmOdometer != null && kmOdometer < 0) return false
 
         viewModelScope.launch {
-            stopRepository.addStop(
-                travelId = current.id,
-                place = place,
-                km = km
+            stopRepository.upsert(
+                TravelStopEntity(
+                    travelId = t.id,
+                    place = place.trim(),
+                    kmOdometer = kmOdometer
+                )
+            )
+        }
+        return true
+    }
+
+    fun updateStop(stopId: String, place: String, kmOdometer: Int?): Boolean {
+        val t = currentTravel.value ?: return false
+        if (t.status != TravelStatus.IN_PROGRESS) return false
+        if (place.isBlank()) return false
+        if (kmOdometer != null && kmOdometer < 0) return false
+
+        val old = stopsForCurrentTravel.value.firstOrNull { it.id == stopId } ?: return false
+
+        viewModelScope.launch {
+            stopRepository.upsert(
+                old.copy(
+                    place = place.trim(),
+                    kmOdometer = kmOdometer
+                )
             )
         }
         return true
     }
 
     fun deleteStop(stopId: String) {
-        viewModelScope.launch { stopRepository.deleteStop(stopId) }
+        val t = currentTravel.value ?: return
+        if (t.status != TravelStatus.IN_PROGRESS) return
+        viewModelScope.launch { stopRepository.delete(stopId) }
     }
 
+    // -------- Viajes (lo tuyo) --------
     fun startTravel(
         origin: String,
         destination: String,
@@ -132,24 +151,15 @@ class ActivityViewModel(
         val current = currentTravel.value ?: return false
         if (hoursDraft != null && hoursDraft < 0.0) return false
 
-        viewModelScope.launch {
-            repository.updateHoursDraft(current.id, hoursDraft)
-        }
+        viewModelScope.launch { repository.updateHoursDraft(current.id, hoursDraft) }
         return true
     }
 
-    // ✅ Facturado (manual)
     fun setFacturado(travelId: String, isInvoiced: Boolean) {
-        viewModelScope.launch {
-            repository.setInvoiced(travelId, isInvoiced)
-        }
+        viewModelScope.launch { repository.setInvoiced(travelId, isInvoiced) }
     }
 
-    fun closeCurrentTravel(
-        kmEnd: Int,
-        hoursImputed: Double,
-        hoursCalculated: Double
-    ): Boolean {
+    fun closeCurrentTravel(kmEnd: Int, hoursImputed: Double, hoursCalculated: Double): Boolean {
         val defaults = ParamSnapshots(
             costeKmOperativo = 0.19,
             costeDietaFija = 12.0,
