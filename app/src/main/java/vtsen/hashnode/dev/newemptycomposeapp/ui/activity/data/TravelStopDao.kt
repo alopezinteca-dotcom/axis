@@ -18,6 +18,6 @@ interface TravelStopDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertStop(stop: TravelStopEntity)
 
-    @Query("DELETE FROM travel_stops WHERE id = :id")
-    suspend fun deleteStop(id: String)
+    @Query("DELETE FROM travel_stops WHERE id = :stopId")
+    suspend fun deleteStop(stopId: String)
 }
