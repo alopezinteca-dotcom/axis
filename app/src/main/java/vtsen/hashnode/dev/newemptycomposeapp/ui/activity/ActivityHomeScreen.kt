@@ -90,9 +90,11 @@ fun ActivityHomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var isExporting by remember { mutableStateOf(false) }
 
+    
     val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle()
-    val stopsForCurrent by viewModel.stopsForCurrentTravel.collectAsStateWithLifecycle()
+    val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle()
+
 
     // =========================
     // 1) PERIODO (DataStore)
@@ -134,6 +136,8 @@ LaunchedEffect(fromMillis, toMillis) {
 
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var travelToDeleteId by remember { mutableStateOf<String?>(null) }
 
     val fromPickerState = rememberDatePickerState(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
@@ -311,6 +315,23 @@ val stopsCountByDay = remember(stopsInPeriod, zone) {
     // =========================
     // Scaffold con TopAppBar + 📅
     // =========================
+if (showDeleteConfirm && travelToDeleteId != null) {
+    AlertDialog(
+        onDismissRequest = { showDeleteConfirm = false },
+        title = { Text("Eliminar viaje") },
+        text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
+        confirmButton = {
+            TextButton(onClick = {
+                viewModel.deleteTravel(travelToDeleteId!!)
+                travelToDeleteId = null
+                showDeleteConfirm = false
+            }) { Text("Eliminar") }
+        },
+        dismissButton = {
+            TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") }
+        }
+    )
+}    
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
@@ -598,14 +619,17 @@ Column(
             } else {
                 travelsToday.forEach { t ->
                     TravelRowCard(
-                        travel = t,
-                        zone = zone,
-                        dateFormatter = dateFormatter,
-                        onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
-                        onClick = { onEditTravelClick(t.id) }
-                    )
-                }
-            }
+    travel = t,
+    zone = zone,
+    dateFormatter = dateFormatter,
+    onToggleInvoiced = { checked -> viewModel.setFacturado(t.id, checked) },
+    onClick = { onEditTravelClick(t.id) },
+    onDelete = {
+        travelToDeleteId = t.id
+        showDeleteConfirm = true
+    }
+)
+
 
             Spacer(Modifier.height(6.dp))
         }
@@ -649,7 +673,8 @@ private fun TravelRowCard(
     zone: ZoneId,
     dateFormatter: DateTimeFormatter,
     onToggleInvoiced: (Boolean) -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: () -> Unit
 ) {
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDate(travel.startTimestamp, zone).format(dateFormatter)
@@ -659,7 +684,6 @@ private fun TravelRowCard(
         modifier = Modifier.fillMaxWidth().clickable { onClick() }
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -677,6 +701,7 @@ private fun TravelRowCard(
                         onCheckedChange = { onToggleInvoiced(it) },
                         colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
                     )
+                    TextButton(onClick = onDelete) { Text("🗑️") }
                 }
             }
 
