@@ -759,3 +759,30 @@ private fun expandVacationDates(vacations: List<Vacation>, periodFrom: LocalDate
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
 private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
+private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
+    if (to.isBefore(from)) return emptyList()
+    val out = ArrayList<LocalDate>()
+    var d = from
+    while (!d.isAfter(to)) {
+        out.add(d)
+        d = d.plusDays(1)
+    }
+    return out
+}
+
+@Composable
+private fun DayHeader(day: LocalDate, dateFormatter: DateTimeFormatter) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(day.format(dateFormatter), fontWeight = FontWeight.Bold)
+            Text("Día ${day.dayOfMonth}", fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
