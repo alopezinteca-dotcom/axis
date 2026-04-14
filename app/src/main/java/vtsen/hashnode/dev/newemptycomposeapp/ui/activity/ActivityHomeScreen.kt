@@ -116,6 +116,12 @@ fun ActivityHomeScreen(
         }
     }
 
+LaunchedEffect(fromMillis, toMillis) {
+    if (fromMillis != 0L && toMillis != 0L) {
+        viewModel.setStopsRange(fromMillis, toMillis)
+    }
+}
+    
     val fromDate = remember(fromMillis) {
         if (fromMillis == 0L) LocalDate.now()
         else BillingPeriodStore.millisToLocalDate(fromMillis, zone)
