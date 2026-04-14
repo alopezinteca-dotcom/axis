@@ -1,6 +1,5 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import androidx.compose.foundation.text.KeyboardOptions
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -55,7 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -84,12 +83,14 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesSt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+
 fun ActivityHomeScreen(
     viewModel: ActivityViewModel,
     onNewTravelClick: () -> Unit,
     onCurrentTravelClick: () -> Unit,
-    onEditTravelClick: (String) -> Unit = {} // compat: ya no lo usamos, editamos en diálogo
-) {
+    onEditTravelClick: (String) -> Unit = {}
+)
+ {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
