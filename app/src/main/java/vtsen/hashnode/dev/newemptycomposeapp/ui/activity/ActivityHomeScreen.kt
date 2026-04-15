@@ -77,6 +77,7 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -210,6 +211,17 @@ fun ActivityHomeScreen(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
     )
 
+    // ✅ Festivos del periodo (lista + set + mapa por fecha)
+    val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
+        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
+    }
+    val holidayDatesInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
+    }
+    val holidayByDateInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.associateBy { it.date } }
+    }
+
     // =========================
     // 3) VIAJES DEL PERIODO
     // =========================
@@ -253,10 +265,6 @@ fun ActivityHomeScreen(
             periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
         }
-    }
-
-    val holidayDatesInPeriod by remember(allHolidays, fromDate, toDate) {
-        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate }.map { it.date }.toSet() }
     }
 
     val vacationDatesInPeriod by remember(allVacations, fromDate, toDate) {
@@ -332,7 +340,7 @@ fun ActivityHomeScreen(
             triggerExport(it)
         }
     }
-    // =========================
+// =========================
     // UI: Gestión calendario (📅)
     // =========================
     if (showCalendarManager) {
@@ -645,7 +653,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers desde/hasta (mantengo tus DatePickerDialog originales)
+        // Pickers desde/hasta (mantengo tus DatePickerDialog)
         if (showFromPicker) {
             androidx.compose.material3.DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -793,9 +801,10 @@ fun ActivityHomeScreen(
                     items(daysInRange) { day ->
 
                         val isWeekend = day.isWeekend()
-                        val isHoliday = holidayDatesInPeriod.contains(day)
+                        val holiday: Holiday? = holidayByDateInPeriod[day]
+                        val isHoliday = holiday != null
 
-                        // ✅ Header: Lunes/Martes…, finde rojo, festivo rojo y visible
+                        // ✅ Header: Lunes/Martes…, finde rojo, festivo rojo
                         DayHeader(
                             day = day,
                             dateFormatter = dateFormatter,
@@ -804,17 +813,25 @@ fun ActivityHomeScreen(
                             isHoliday = isHoliday
                         )
 
-                        // ✅ Banner festivo visible (aunque no haya viajes)
-                        if (isHoliday) {
+                        // ✅ Banner festivo visible + descripción guardada
+                        if (holiday != null) {
                             Card(
                                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(
-                                    Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Text("🎉 FESTIVO", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                    Text(
+                                        "🎉 FESTIVO",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                    val desc = holiday.description.trim()
+                                    if (desc.isNotBlank()) {
+                                        Text(desc, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    }
                                 }
                             }
                         }
