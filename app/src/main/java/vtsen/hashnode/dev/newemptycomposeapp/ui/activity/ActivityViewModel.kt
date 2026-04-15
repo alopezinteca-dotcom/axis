@@ -2,12 +2,14 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,7 +17,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -38,7 +39,7 @@ data class ParamSnapshots(
 )
 
 class ActivityViewModel(
-    private val appContext: Context, // <- usa applicationContext al crear el VM
+    private val appContext: Context, // pasa applicationContext al crear el VM
     private val repository: TravelRepository,
     private val stopRepository: TravelStopRepository
 ) : ViewModel() {
@@ -97,7 +98,7 @@ class ActivityViewModel(
     }
 
     fun setBillingPeriodDates(from: LocalDate, to: LocalDate) {
-        // ✅ Normaliza para evitar bugs silenciosos si el user invierte
+        // ✅ Normaliza para evitar bugs si el usuario invierte
         val a = if (from.isAfter(to)) to else from
         val b = if (from.isAfter(to)) from else to
 
@@ -164,7 +165,7 @@ class ActivityViewModel(
     val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
         billingPeriod
             .map { p ->
-                // defensivo: por si viniese invertido (idealmente ya viene normalizado del store)
+                // defensivo: por si viniese invertido
                 if (p.fromMillis <= p.toMillis) p else BillingPeriod(p.toMillis, p.fromMillis)
             }
             .distinctUntilChanged()
@@ -297,7 +298,7 @@ class ActivityViewModel(
      */
     fun updateTravel(updated: TravelEntity) {
         viewModelScope.launch {
-            repository.insertTravel(updated) // REPLACE por id (como lo tenías)
+            repository.insertTravel(updated)
         }
     }
 
@@ -377,12 +378,12 @@ class ActivityViewModel(
 
     /**
      * Exporta CSV al folderUri (SAF / Drive). Borra si existe.
-     * Mantén tu fileName determinista (p.ej. "AXIS_export_2026_04.csv") desde UI.
+     * Mantén tu fileName determinista desde UI.
      */
     fun exportUnifiedCsv(folderUri: Uri, fileName: String) {
         if (_isExporting.value) return
 
-        val travelsSnapshot = allTravels.value // o pásalos desde UI si prefieres
+        val travelsSnapshot = allTravels.value
         val stopsSnapshot = stopsInPeriod.value
 
         viewModelScope.launch {
