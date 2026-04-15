@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -27,7 +28,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -54,7 +54,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,6 +61,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 import kotlin.math.abs
@@ -79,21 +79,18 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementD
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
 
-
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-
 fun ActivityHomeScreen(
     viewModel: ActivityViewModel,
     onNewTravelClick: () -> Unit,
     onCurrentTravelClick: () -> Unit,
     onEditTravelClick: (String) -> Unit = {}
-)
- {
+) {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
     val dateFormatter = remember { DateTimeFormatter.ofPattern("dd/MM/yyyy") }
+    val localeEs = remember { Locale("es", "ES") }
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -192,8 +189,10 @@ fun ActivityHomeScreen(
     // =========================
     // 2) Festivos + Vacaciones (manual)
     // =========================
-    val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
-    val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
+    val allHolidays by CalendarOverridesStore.holidaysFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val allVacations by CalendarOverridesStore.vacationsFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
     var showCalendarManager by remember { mutableStateOf(false) }
 
     var showAddHoliday by remember { mutableStateOf(false) }
@@ -238,7 +237,9 @@ fun ActivityHomeScreen(
     // =========================
     // 4) KPI REAL PERIODO
     // =========================
-    val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
+    val totalEstimadoPeriodo by remember(periodTravels) {
+        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
+    }
 
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf {
@@ -257,10 +258,12 @@ fun ActivityHomeScreen(
     val holidayDatesInPeriod by remember(allHolidays, fromDate, toDate) {
         derivedStateOf { allHolidays.filter { it.date in fromDate..toDate }.map { it.date }.toSet() }
     }
+
     val vacationDatesInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { expandVacationDates(allVacations, fromDate, toDate) }
     }
 
+    // ✅ Días laborables recalculando (L-V, restando festivos y vacaciones solo si caen entre semana)
     val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
         derivedStateOf {
             countWeekdaysInclusive(fromDate, toDate) -
@@ -329,7 +332,6 @@ fun ActivityHomeScreen(
             triggerExport(it)
         }
     }
-
     // =========================
     // UI: Gestión calendario (📅)
     // =========================
@@ -381,7 +383,10 @@ fun ActivityHomeScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     original?.let {
                         if (it.status == TravelStatus.CLOSED) {
-                            Text("⚠️ Editando viaje CERRADO (histórico).", color = MaterialTheme.colorScheme.error)
+                            Text(
+                                "⚠️ Editando viaje CERRADO (histórico).",
+                                color = MaterialTheme.colorScheme.error
+                            )
                         }
                     }
 
@@ -412,7 +417,10 @@ fun ActivityHomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         Text("Dieta", fontWeight = FontWeight.SemiBold)
                         Switch(checked = editHasDiet, onCheckedChange = { editHasDiet = it })
                     }
@@ -440,7 +448,10 @@ fun ActivityHomeScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                         Text("Facturado", fontWeight = FontWeight.SemiBold)
                         Switch(checked = editIsInvoiced, onCheckedChange = { editIsInvoiced = it })
                     }
@@ -516,6 +527,99 @@ fun ActivityHomeScreen(
     }
 
     // =========================
+    // ✅ Diálogo añadir festivo (FIX: se ve el texto al escribir)
+    // =========================
+    if (showAddHoliday) {
+        AlertDialog(
+            onDismissRequest = { showAddHoliday = false },
+            title = { Text("Añadir festivo", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = holidayDesc,
+                        onValueChange = { holidayDesc = it },
+                        label = { Text("Descripción (festivo)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    DatePicker(state = holidayPickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val picked = holidayPickerState.selectedDateMillis
+                    if (picked != null) {
+                        val d = BillingPeriodStore.millisToLocalDate(picked, zone)
+                        coroutineScope.launch {
+                            CalendarOverridesStore.addHoliday(context, d, holidayDesc)
+                            holidayDesc = ""
+                            snackbarHostState.showSnackbar("✅ Festivo añadido")
+                        }
+                    }
+                    showAddHoliday = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddHoliday = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // =========================
+    // ✅ Diálogo añadir vacaciones (mismo patrón: scroll + text visible)
+    // =========================
+    if (showAddVacation) {
+        AlertDialog(
+            onDismissRequest = { showAddVacation = false },
+            title = { Text("Añadir vacaciones", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = vacationDesc,
+                        onValueChange = { vacationDesc = it },
+                        label = { Text("Descripción (vacaciones)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Text("Desde", fontWeight = FontWeight.SemiBold)
+                    DatePicker(state = vacFromPickerState)
+
+                    Text("Hasta", fontWeight = FontWeight.SemiBold)
+                    DatePicker(state = vacToPickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val aMillis = vacFromPickerState.selectedDateMillis
+                    val bMillis = vacToPickerState.selectedDateMillis
+                    if (aMillis != null && bMillis != null) {
+                        val a = BillingPeriodStore.millisToLocalDate(aMillis, zone)
+                        val b = BillingPeriodStore.millisToLocalDate(bMillis, zone)
+                        coroutineScope.launch {
+                            CalendarOverridesStore.addVacation(context, a, b, vacationDesc)
+                            vacationDesc = ""
+                            snackbarHostState.showSnackbar("✅ Vacaciones añadidas")
+                        }
+                    }
+                    showAddVacation = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddVacation = false }) { Text("Cancelar") }
+            }
+        )
+    }
+
+    // =========================
     // Scaffold principal
     // =========================
     Scaffold(
@@ -541,9 +645,9 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers desde/hasta
+        // Pickers desde/hasta (mantengo tus DatePickerDialog originales)
         if (showFromPicker) {
-            DatePickerDialog(
+            androidx.compose.material3.DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
                 confirmButton = {
                     TextButton(onClick = {
@@ -561,7 +665,7 @@ fun ActivityHomeScreen(
         }
 
         if (showToPicker) {
-            DatePickerDialog(
+            androidx.compose.material3.DatePickerDialog(
                 onDismissRequest = { showToPicker = false },
                 confirmButton = {
                     TextButton(onClick = {
@@ -578,75 +682,6 @@ fun ActivityHomeScreen(
             ) { DatePicker(state = toPickerState) }
         }
 
-        // Añadir festivo
-        if (showAddHoliday) {
-            DatePickerDialog(
-                onDismissRequest = { showAddHoliday = false },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val picked = holidayPickerState.selectedDateMillis
-                        if (picked != null) {
-                            val d = BillingPeriodStore.millisToLocalDate(picked, zone)
-                            coroutineScope.launch {
-                                CalendarOverridesStore.addHoliday(context, d, holidayDesc)
-                                holidayDesc = ""
-                                snackbarHostState.showSnackbar("✅ Festivo añadido")
-                            }
-                        }
-                        showAddHoliday = false
-                    }) { Text("Guardar") }
-                },
-                dismissButton = { TextButton(onClick = { showAddHoliday = false }) { Text("Cancelar") } }
-            ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    DatePicker(state = holidayPickerState)
-                    OutlinedTextField(
-                        value = holidayDesc,
-                        onValueChange = { holidayDesc = it },
-                        label = { Text("Descripción (festivo)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        }
-
-        // Añadir vacaciones
-        if (showAddVacation) {
-            DatePickerDialog(
-                onDismissRequest = { showAddVacation = false },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val aMillis = vacFromPickerState.selectedDateMillis
-                        val bMillis = vacToPickerState.selectedDateMillis
-                        if (aMillis != null && bMillis != null) {
-                            val a = BillingPeriodStore.millisToLocalDate(aMillis, zone)
-                            val b = BillingPeriodStore.millisToLocalDate(bMillis, zone)
-                            coroutineScope.launch {
-                                CalendarOverridesStore.addVacation(context, a, b, vacationDesc)
-                                vacationDesc = ""
-                                snackbarHostState.showSnackbar("✅ Vacaciones añadidas")
-                            }
-                        }
-                        showAddVacation = false
-                    }) { Text("Guardar") }
-                },
-                dismissButton = { TextButton(onClick = { showAddVacation = false }) { Text("Cancelar") } }
-            ) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Desde", fontWeight = FontWeight.SemiBold)
-                    DatePicker(state = vacFromPickerState)
-                    Text("Hasta", fontWeight = FontWeight.SemiBold)
-                    DatePicker(state = vacToPickerState)
-                    OutlinedTextField(
-                        value = vacationDesc,
-                        onValueChange = { vacationDesc = it },
-                        label = { Text("Descripción (vacaciones)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-        }
-
         // Layout principal
         Row(
             modifier = Modifier
@@ -657,7 +692,10 @@ fun ActivityHomeScreen(
         ) {
             // IZQUIERDA KPIs
             Column(
-                modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .weight(0.35f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -686,7 +724,9 @@ fun ActivityHomeScreen(
                             ) { Text("Este mes") }
                             Button(
                                 onClick = {
-                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) }
+                                    coroutineScope.launch {
+                                        BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second)
+                                    }
                                 },
                                 modifier = Modifier.weight(1f)
                             ) { Text("Reset") }
@@ -726,7 +766,10 @@ fun ActivityHomeScreen(
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     if (isExporting) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
                             CircularProgressIndicator(strokeWidth = 2.dp)
                             Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
                         }
@@ -749,7 +792,32 @@ fun ActivityHomeScreen(
                 ) {
                     items(daysInRange) { day ->
 
-                        DayHeader(day = day, dateFormatter = dateFormatter)
+                        val isWeekend = day.isWeekend()
+                        val isHoliday = holidayDatesInPeriod.contains(day)
+
+                        // ✅ Header: Lunes/Martes…, finde rojo, festivo rojo y visible
+                        DayHeader(
+                            day = day,
+                            dateFormatter = dateFormatter,
+                            localeEs = localeEs,
+                            isWeekend = isWeekend,
+                            isHoliday = isHoliday
+                        )
+
+                        // ✅ Banner festivo visible (aunque no haya viajes)
+                        if (isHoliday) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("🎉 FESTIVO", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
 
                         // 📍 Solo número de paradas del día
                         val stopCount = stopsCountByDay[day] ?: 0
@@ -793,11 +861,18 @@ fun ActivityHomeScreen(
 
                         if (stopCount == 0 && (currentDay != day) && travelsToday.isEmpty()) {
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = when {
+                                        isHoliday || isWeekend -> MaterialTheme.colorScheme.errorContainer
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    }
+                                ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(Modifier.padding(12.dp)) {
-                                    Text("Sin viajes", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    val color = if (isHoliday || isWeekend) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                    Text("Sin viajes", color = color)
                                 }
                             }
                         } else {
@@ -823,7 +898,6 @@ fun ActivityHomeScreen(
         }
     }
 }
-
 /* =========================
    Helpers UI + Export + Date
    ========================= */
@@ -879,7 +953,11 @@ private fun TravelRowCard(
             ) {
                 Column(Modifier.weight(1f)) {
                     Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
-                    Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "Ref: ${travel.description}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1002,10 +1080,36 @@ private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDat
     return out
 }
 
+private fun LocalDate.isWeekend(): Boolean =
+    this.dayOfWeek == DayOfWeek.SATURDAY || this.dayOfWeek == DayOfWeek.SUNDAY
+
+private fun capitalizeFirst(s: String): String =
+    s.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale("es", "ES")) else it.toString() }
+
 @Composable
-private fun DayHeader(day: LocalDate, dateFormatter: DateTimeFormatter) {
+private fun DayHeader(
+    day: LocalDate,
+    dateFormatter: DateTimeFormatter,
+    localeEs: Locale,
+    isWeekend: Boolean,
+    isHoliday: Boolean
+) {
+    val weekdayName = remember(day) {
+        capitalizeFirst(day.dayOfWeek.getDisplayName(TextStyle.FULL, localeEs))
+    }
+
+    val containerColor = when {
+        isHoliday || isWeekend -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.primaryContainer
+    }
+
+    val titleColor = when {
+        isHoliday || isWeekend -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
+    }
+
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
         modifier = Modifier.fillMaxWidth()
     ) {
         Row(
@@ -1013,8 +1117,24 @@ private fun DayHeader(day: LocalDate, dateFormatter: DateTimeFormatter) {
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(day.format(dateFormatter), fontWeight = FontWeight.Bold)
-            Text("Día ${day.dayOfMonth}", fontWeight = FontWeight.SemiBold)
+            Column {
+                Text(
+                    weekdayName,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor
+                )
+                Text(
+                    day.format(dateFormatter),
+                    fontWeight = FontWeight.SemiBold,
+                    color = titleColor.copy(alpha = 0.9f)
+                )
+            }
+
+            Text(
+                "Día ${day.dayOfMonth}",
+                fontWeight = FontWeight.SemiBold,
+                color = titleColor
+            )
         }
     }
 }
