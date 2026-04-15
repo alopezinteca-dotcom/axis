@@ -1,7 +1,190 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.content.Context
-import android.net.Uri
+import showFromPicker by remember { mutableStateOf(false) }import android.net.Uri
+    var showToPicker by remember { mutableStateOf(false) }
+
+    val fromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+    )
+    val toPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+    )
+
+    fun saveRange(newFrom: LocalDate, newTo: LocalDate) {
+        val f = BillingPeriodStore.localDateStartMillis(newFrom, zone)
+        val t = BillingPeriodStore.localDateEndMillis(newTo, zone)
+        coroutineScope.launch { BillingPeriodStore.savePeriod(context, f, t) }
+    }
+
+    // =========================
+    // 2) Festivos + Vacaciones (manual)
+    // =========================
+    val allHolidays by CalendarOverridesStore.holidaysFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val allVacations by CalendarOverridesStore.vacationsFlow(context)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    var showCalendarManager by remember { mutableStateOf(false) }
+
+    var showAddHoliday by remember { mutableStateOf(false) }
+    var showAddVacation by remember { mutableStateOf(false) }
+    var holidayDesc by remember { mutableStateOf("") }
+    var vacationDesc by remember { mutableStateOf("") }
+
+    val holidayPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacFromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacToPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+
+    // ✅ Festivos del periodo (lista + set + mapa por fecha)
+    val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
+        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
+    }
+    val holidayDatesInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
+    }
+    val holidayByDateInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.associateBy { it.date } }
+    }
+
+    // ✅ Vacaciones solapadas con el periodo (para mostrar en timeline con descripción)
+    val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
+        derivedStateOf {
+            allVacations.filter { v ->
+                !(v.to.isBefore(fromDate) || v.from.isAfter(toDate))
+            }
+        }
+    }
+
+    // Set de fechas de vacaciones (para KPI de días laborables)
+    val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
+        derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
+    }
+
+    // Mapa día -> lista de descripciones (para banner en timeline)
+    val vacationDescsByDateInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
+        derivedStateOf { buildVacationDescriptionsByDate(vacationsInPeriod, fromDate, toDate) }
+    }
+
+    // =========================
+    // 3) VIAJES DEL PERIODO
+    // =========================
+    val periodTravels by remember(allTravels, fromMillis, toMillis) {
+        derivedStateOf {
+            if (fromMillis == 0L || toMillis == 0L) emptyList()
+            else allTravels.filter { it.startTimestamp in fromMillis..toMillis }
+        }
+    }
+
+    // =========================
+    // 3.1) Timeline por día (ASC)
+    // =========================
+    val daysInRange = remember(fromDate, toDate) { datesBetweenInclusive(fromDate, toDate) }
+
+    val travelsByDay = remember(periodTravels, zone) {
+        periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone) }
+    }
+
+    val stopsCountByDay = remember(stopsInPeriod, zone) {
+        stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
+            .mapValues { it.value.size }
+    }
+
+    // =========================
+    // 4) KPI REAL PERIODO
+    // =========================
+    val totalEstimadoPeriodo by remember(periodTravels) {
+        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
+    }
+
+    val horasImputadasPeriodo by remember(periodTravels) {
+        derivedStateOf {
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
+                .sumOf { it.hoursImputed ?: 0.0 }
+        }
+    }
+
+    val kmPeriodo by remember(periodTravels) {
+        derivedStateOf {
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
+                .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
+        }
+    }
+
+    // ✅ Días laborables recalculando (L-V, restando festivos y vacaciones solo si caen entre semana)
+    val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
+        derivedStateOf {
+            countWeekdaysInclusive(fromDate, toDate) -
+                countWeekdaysInSet(fromDate, toDate, holidayDatesInPeriod) -
+                countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
+        }
+    }
+    val diasLaborables = if (diasLaborablesReales < 0) 0 else diasLaborablesReales
+    val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
+    val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
+    val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
+
+    val yearStartMillis = remember {
+        BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
+    }
+    val nowEndMillis = remember {
+        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
+    }
+    val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
+        derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
+    }
+    val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
+
+    val pendienteFacturar by remember(allTravels) {
+        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
+    }
+
+    // =========================
+    // 5) Export CSV ÚNICO (TRAVEL + STOP)
+    // =========================
+    fun unifiedExportFileName(): String {
+        val stamp = java.text.SimpleDateFormat("yyyy_MM", Locale.getDefault()).format(java.util.Date())
+        return "AXIS_export_$stamp.csv"
+    }
+
+    fun triggerExport(folderUri: Uri) {
+        if (isExporting) return
+        isExporting = true
+        val fileName = unifiedExportFileName()
+
+        coroutineScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    exportUnifiedCsvIO(
+                        context = context,
+                        folderUri = folderUri,
+                        fileName = fileName,
+                        travels = periodTravels,
+                        stops = stopsInPeriod
+                    )
+                }
+                snackbarHostState.showSnackbar("✅ Exportado: $fileName")
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
+            } finally {
+                isExporting = false
+            }
+        }
+    }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let {
+            ExportPreferences.saveFolderUri(context, it)
+            triggerExport(it)
+        }
+    }
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -169,176 +352,6 @@ fun ActivityHomeScreen(
     }
     val toDate = remember(toMillis) {
         if (toMillis == 0L) LocalDate.now() else BillingPeriodStore.millisToLocalDate(toMillis, zone)
-    }
-
-    var showFromPicker by remember { mutableStateOf(false) }
-    var showToPicker by remember { mutableStateOf(false) }
-
-    val fromPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
-    )
-    val toPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
-    )
-
-    fun saveRange(newFrom: LocalDate, newTo: LocalDate) {
-        val f = BillingPeriodStore.localDateStartMillis(newFrom, zone)
-        val t = BillingPeriodStore.localDateEndMillis(newTo, zone)
-        coroutineScope.launch { BillingPeriodStore.savePeriod(context, f, t) }
-    }
-
-    // =========================
-    // 2) Festivos + Vacaciones (manual)
-    // =========================
-    val allHolidays by CalendarOverridesStore.holidaysFlow(context)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val allVacations by CalendarOverridesStore.vacationsFlow(context)
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    var showCalendarManager by remember { mutableStateOf(false) }
-
-    var showAddHoliday by remember { mutableStateOf(false) }
-    var showAddVacation by remember { mutableStateOf(false) }
-    var holidayDesc by remember { mutableStateOf("") }
-    var vacationDesc by remember { mutableStateOf("") }
-
-    val holidayPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-    val vacFromPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-    val vacToPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
-    )
-
-    // ✅ Festivos del periodo (lista + set + mapa por fecha)
-    val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
-        derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
-    }
-    val holidayDatesInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
-    }
-    val holidayByDateInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.associateBy { it.date } }
-    }
-
-    // =========================
-    // 3) VIAJES DEL PERIODO
-    // =========================
-    val periodTravels by remember(allTravels, fromMillis, toMillis) {
-        derivedStateOf {
-            if (fromMillis == 0L || toMillis == 0L) emptyList()
-            else allTravels.filter { it.startTimestamp in fromMillis..toMillis }
-        }
-    }
-
-    // =========================
-    // 3.1) Timeline por día (ASC)
-    // =========================
-    val daysInRange = remember(fromDate, toDate) { datesBetweenInclusive(fromDate, toDate) }
-
-    val travelsByDay = remember(periodTravels, zone) {
-        periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDate(t.startTimestamp, zone) }
-    }
-
-    val stopsCountByDay = remember(stopsInPeriod, zone) {
-        stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDate(s.timestamp, zone) }
-            .mapValues { it.value.size }
-    }
-
-    // =========================
-    // 4) KPI REAL PERIODO
-    // =========================
-    val totalEstimadoPeriodo by remember(periodTravels) {
-        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
-    }
-
-    val horasImputadasPeriodo by remember(periodTravels) {
-        derivedStateOf {
-            periodTravels.filter { it.status == TravelStatus.CLOSED }
-                .sumOf { it.hoursImputed ?: 0.0 }
-        }
-    }
-
-    val kmPeriodo by remember(periodTravels) {
-        derivedStateOf {
-            periodTravels.filter { it.status == TravelStatus.CLOSED }
-                .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
-        }
-    }
-
-    val vacationDatesInPeriod by remember(allVacations, fromDate, toDate) {
-        derivedStateOf { expandVacationDates(allVacations, fromDate, toDate) }
-    }
-
-    // ✅ Días laborables recalculando (L-V, restando festivos y vacaciones solo si caen entre semana)
-    val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
-        derivedStateOf {
-            countWeekdaysInclusive(fromDate, toDate) -
-                countWeekdaysInSet(fromDate, toDate, holidayDatesInPeriod) -
-                countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
-        }
-    }
-    val diasLaborables = if (diasLaborablesReales < 0) 0 else diasLaborablesReales
-    val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
-    val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
-    val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
-
-    val yearStartMillis = remember {
-        BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
-    }
-    val nowEndMillis = remember {
-        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
-    }
-    val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
-        derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
-    }
-    val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
-
-    val pendienteFacturar by remember(allTravels) {
-        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
-    }
-
-    // =========================
-    // 5) Export CSV ÚNICO (TRAVEL + STOP)
-    // =========================
-    fun unifiedExportFileName(): String {
-        val stamp = java.text.SimpleDateFormat("yyyy_MM", Locale.getDefault()).format(java.util.Date())
-        return "AXIS_export_$stamp.csv"
-    }
-
-    fun triggerExport(folderUri: Uri) {
-        if (isExporting) return
-        isExporting = true
-        val fileName = unifiedExportFileName()
-
-        coroutineScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    exportUnifiedCsvIO(
-                        context = context,
-                        folderUri = folderUri,
-                        fileName = fileName,
-                        travels = periodTravels,
-                        stops = stopsInPeriod
-                    )
-                }
-                snackbarHostState.showSnackbar("✅ Exportado: $fileName")
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
-            } finally {
-                isExporting = false
-            }
-        }
-    }
-
-    val folderPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let {
-            ExportPreferences.saveFolderUri(context, it)
-            triggerExport(it)
-        }
     }
 // =========================
     // UI: Gestión calendario (📅)
@@ -653,7 +666,7 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers desde/hasta (mantengo tus DatePickerDialog)
+        // Pickers desde/hasta
         if (showFromPicker) {
             androidx.compose.material3.DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -801,16 +814,21 @@ fun ActivityHomeScreen(
                     items(daysInRange) { day ->
 
                         val isWeekend = day.isWeekend()
+
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
 
-                        // ✅ Header: Lunes/Martes…, finde rojo, festivo rojo
+                        val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
+                        val isVacation = vacationDescs.isNotEmpty()
+
+                        // ✅ Header: Lunes/Martes…, finde rojo, festivo rojo, vacaciones amarillo (si no es festivo/finde)
                         DayHeader(
                             day = day,
                             dateFormatter = dateFormatter,
                             localeEs = localeEs,
                             isWeekend = isWeekend,
-                            isHoliday = isHoliday
+                            isHoliday = isHoliday,
+                            isVacation = isVacation
                         )
 
                         // ✅ Banner festivo visible + descripción guardada
@@ -831,6 +849,30 @@ fun ActivityHomeScreen(
                                     val desc = holiday.description.trim()
                                     if (desc.isNotBlank()) {
                                         Text(desc, color = MaterialTheme.colorScheme.onErrorContainer)
+                                    }
+                                }
+                            }
+                        } else if (isVacation) {
+                            // ✅ Banner vacaciones visible + descripciones (puede haber más de una)
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        "🏖️ VACACIONES",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+
+                                    val cleaned = vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                                    if (cleaned.isNotEmpty()) {
+                                        cleaned.forEach { line ->
+                                            Text(line, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        }
                                     }
                                 }
                             }
@@ -881,14 +923,18 @@ fun ActivityHomeScreen(
                                 colors = CardDefaults.cardColors(
                                     containerColor = when {
                                         isHoliday || isWeekend -> MaterialTheme.colorScheme.errorContainer
+                                        isVacation -> MaterialTheme.colorScheme.tertiaryContainer
                                         else -> MaterialTheme.colorScheme.surfaceVariant
                                     }
                                 ),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(Modifier.padding(12.dp)) {
-                                    val color = if (isHoliday || isWeekend) MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                    val color = when {
+                                        isHoliday || isWeekend -> MaterialTheme.colorScheme.error
+                                        isVacation -> MaterialTheme.colorScheme.onTertiaryContainer
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                     Text("Sin viajes", color = color)
                                 }
                             }
@@ -1082,6 +1128,32 @@ private fun expandVacationDates(vacations: List<Vacation>, periodFrom: LocalDate
     return out
 }
 
+// ✅ Nuevo: Mapa día -> lista de descripciones de vacaciones que cubren ese día
+private fun buildVacationDescriptionsByDate(
+    vacations: List<Vacation>,
+    periodFrom: LocalDate,
+    periodTo: LocalDate
+): Map<LocalDate, List<String>> {
+    if (vacations.isEmpty()) return emptyMap()
+
+    val map = mutableMapOf<LocalDate, MutableList<String>>()
+
+    vacations.forEach { v ->
+        var d = maxOf(v.from, periodFrom)
+        val end = minOf(v.to, periodTo)
+        while (!d.isAfter(end)) {
+            val list = map.getOrPut(d) { mutableListOf() }
+            list.add(v.description)
+            d = d.plusDays(1)
+        }
+    }
+
+    // devolver como Map inmutable + limpiar duplicados
+    return map.mapValues { (_, v) ->
+        v.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+    }
+}
+
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
 private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
@@ -1109,7 +1181,8 @@ private fun DayHeader(
     dateFormatter: DateTimeFormatter,
     localeEs: Locale,
     isWeekend: Boolean,
-    isHoliday: Boolean
+    isHoliday: Boolean,
+    isVacation: Boolean
 ) {
     val weekdayName = remember(day) {
         capitalizeFirst(day.dayOfWeek.getDisplayName(TextStyle.FULL, localeEs))
@@ -1117,11 +1190,13 @@ private fun DayHeader(
 
     val containerColor = when {
         isHoliday || isWeekend -> MaterialTheme.colorScheme.errorContainer
+        isVacation -> MaterialTheme.colorScheme.tertiaryContainer
         else -> MaterialTheme.colorScheme.primaryContainer
     }
 
     val titleColor = when {
         isHoliday || isWeekend -> MaterialTheme.colorScheme.error
+        isVacation -> MaterialTheme.colorScheme.onTertiaryContainer
         else -> MaterialTheme.colorScheme.onPrimaryContainer
     }
 
