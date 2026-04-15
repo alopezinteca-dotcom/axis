@@ -81,8 +81,9 @@ fun GpsAddressButton(
                 .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
                 .await()
 
-            if (location != null) fetchAddress(location)
-            else {
+            if (location != null) {
+                fetchAddress(location)
+            } else {
                 onError("GPS frío o sin señal. Inténtalo de nuevo.")
                 isFetchingLocation = false
             }
