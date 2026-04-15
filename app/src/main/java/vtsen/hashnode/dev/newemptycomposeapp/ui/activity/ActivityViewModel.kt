@@ -1,7 +1,7 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.content.Context
-importimport android.net.Uri
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
