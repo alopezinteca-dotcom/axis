@@ -14,8 +14,14 @@ class ActivityViewModelFactory(
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         val db = AppDatabase.getDatabase(context.applicationContext)
-        val repo = TravelRepository(db.travelDao())
-        val stopRepo = TravelStopRepository(db.travelStopDao())
-        return ActivityViewModel(repo, stopRepo) as T
+
+        val travelRepository = TravelRepository(db.travelDao())
+        val stopRepository = TravelStopRepository(db.travelStopDao())
+
+        return ActivityViewModel(
+            appContext = context.applicationContext,
+            repository = travelRepository,
+            stopRepository = stopRepository
+        ) as T
     }
 }
