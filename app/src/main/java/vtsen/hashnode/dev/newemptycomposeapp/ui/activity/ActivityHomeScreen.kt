@@ -1,7 +1,5 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -63,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.DayOfWeek
 import java.time.LocalDate
-import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -291,95 +288,147 @@ fun ActivityHomeScreen(
     val pendienteFacturar by remember(allTravels) { derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } } }
 
     // =========================
-    // 5) Export robusto: diario fijo + cierre mensual automático
+    // 5) EXPORT: diario fijo + cierre mensual automático (según Desde/Hasta)
     // =========================
+
     fun dailyFileName(): String = "AXIS_export_actual.csv"
 
-    fun monthKey(ym: YearMonth): String =
-        String.format(Locale.getDefault(), "%04d_%02d", ym.year, ym.monthValue)
-
-    fun monthlyFileName(ym: YearMonth): String =
-        "AXIS_export_${monthKey(ym)}.csv"
-
-    fun exportOne(folderUri: Uri, fileName: String, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
-        exportUnifiedCsvIO(context, folderUri, fileName, travels, stops)
+    // clave del periodo para “cierre mensual según Desde/Hasta”
+    // Usamos el mes de TO (hasta) como referencia de cierre del periodo
+    fun periodKey(): String {
+        val ym = java.time.YearMonth.of(toDate.year, toDate.monthValue)
+        return String.format(Locale.getDefault(), "%04d_%02d", ym.year, ym.monthValue)
     }
 
-    fun smartExport(folderUri: Uri) {
-        if (isExporting) return
-        isExporting = true
+    fun monthlyFileNameForKey(key: String): String = "AXIS_export_$key.csv"
 
+    suspend fun writeCsvToUri(uri: Uri, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
+        // ✅ "wt" = overwrite + truncate (Drive se comporta mejor)
+        context.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+            AxisUnifiedCsvExporter.writeCsv(stream, travels, stops)
+        } ?: throw IllegalStateException("No se pudo abrir OutputStream")
+    }
+
+    // Estado interno: cuando toque cerrar, guardamos el key pendiente
+    var pendingCloseKey by remember { mutableStateOf<String?>(null) }
+
+    // Launcher 1: configurar (o reparar) el archivo diario fijo (Drive)
+    val dailyCreateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri == null) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ No se configuró el archivo diario.") }
+            return@rememberLauncherForActivityResult
+        }
+
+        // Intentar persistir permisos (puede fallar en algunos providers, no pasa nada)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+
+        ExportPreferences.saveDailyFileUri(context, uri)
+
+        // Escribimos inmediatamente el diario para validar que funciona
         coroutineScope.launch {
             try {
+                isExporting = true
                 withContext(Dispatchers.IO) {
-                    // 1) Export diario fijo (siempre)
-                    exportOne(folderUri, dailyFileName(), periodTravels, stopsInPeriod)
-
-                    // 2) Cierre mensual automático (histórico)
-                    val nowYm = YearMonth.now()
-                    val prevYm = nowYm.minusMonths(1)
-                    val prevKey = monthKey(prevYm)
-
-                    val lastClosed = ExportPreferences.getLastClosedMonth(context)
-
-                    if (lastClosed != prevKey) {
-                        // 👉 Export mensual del mes anterior
-                        // Viajes: filtrados del mes anterior (natural)
-                        val prevMonthTravels = allTravels.filter { t ->
-                            val d = BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone)
-                            d.year == prevYm.year && d.monthValue == prevYm.monthValue
-                        }
-
-                        // Stops: en este punto usamos stopsInPeriod (periodo actual).
-                        // Si quieres que sean EXACTOS del mes anterior, te doy un cambio mínimo en ViewModel para pedir stopsInRange(prevMonth).
-                        exportOne(folderUri, monthlyFileName(prevYm), prevMonthTravels, stopsInPeriod)
-
-                        ExportPreferences.setLastClosedMonth(context, prevKey)
-                    }
+                    writeCsvToUri(uri, periodTravels, stopsInPeriod)
                 }
-
-                snackbarHostState.showSnackbar("✅ Export diario actualizado (+ cierre mensual si tocaba)")
+                snackbarHostState.showSnackbar("✅ Diario configurado y exportado: ${dailyFileName()}")
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar("❌ Error export: ${e.localizedMessage ?: "desconocido"}")
+                ExportPreferences.clearDailyFileUri(context)
+                snackbarHostState.showSnackbar("❌ No se pudo escribir en el diario. Reintenta configurar.")
             } finally {
                 isExporting = false
             }
         }
     }
 
-    // =========================
-    // 6) Picker de carpeta SAF forzado a DocumentsUI (para que salga Drive)
-    // =========================
-    val folderPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val uri = result.data?.data ?: return@rememberLauncherForActivityResult
+    // Launcher 2: cierre mensual (solo cuando toque). No guardamos URI, solo cerramos y marcamos key.
+    val monthlyCreateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        val key = pendingCloseKey
+        pendingCloseKey = null
 
-        val flags = result.data?.flags ?: 0
-        val takeFlags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        runCatching { context.contentResolver.takePersistableUriPermission(uri, takeFlags) }
-
-        ExportPreferences.saveFolderUri(context, uri)
-        smartExport(uri)
-    }
-
-    fun launchFolderPickerSaf() {
-        val baseIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        if (uri == null || key == null) {
+            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ Cierre mensual cancelado.") }
+            return@rememberLauncherForActivityResult
         }
 
-        try {
-            // Fuerza DocumentsUI (en Samsung suele hacer aparecer Drive)
-            baseIntent.setPackage("com.android.documentsui")
-            folderPickerLauncher.launch(baseIntent)
-        } catch (_: ActivityNotFoundException) {
-            baseIntent.setPackage(null)
-            folderPickerLauncher.launch(baseIntent)
-        } catch (_: Exception) {
-            baseIntent.setPackage(null)
-            folderPickerLauncher.launch(baseIntent)
+        // Intentar persistir permisos (no imprescindible, pero ayuda)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+
+        coroutineScope.launch {
+            try {
+                isExporting = true
+                withContext(Dispatchers.IO) {
+                    writeCsvToUri(uri, periodTravels, stopsInPeriod)
+                }
+                ExportPreferences.setLastClosedKey(context, key)
+                snackbarHostState.showSnackbar("✅ Periodo cerrado: ${monthlyFileNameForKey(key)}")
+            } catch (e: Exception) {
+                snackbarHostState.showSnackbar("❌ Error al cerrar periodo: ${e.localizedMessage ?: "desconocido"}")
+            } finally {
+                isExporting = false
+            }
+        }
+    }
+
+    fun requestDailyIfMissing() {
+        dailyCreateLauncher.launch(dailyFileName())
+    }
+
+    fun requestMonthlyClose(key: String) {
+        pendingCloseKey = key
+        monthlyCreateLauncher.launch(monthlyFileNameForKey(key))
+    }
+
+    fun doSmartExport() {
+        if (isExporting) return
+
+        val dailyUri = ExportPreferences.getDailyFileUri(context)
+        if (dailyUri == null) {
+            // 1ª vez o se perdió: configurar diario
+            requestDailyIfMissing()
+            return
+        }
+
+        coroutineScope.launch {
+            try {
+                isExporting = true
+
+                // 1) Export diario fijo (siempre)
+                withContext(Dispatchers.IO) {
+                    writeCsvToUri(dailyUri, periodTravels, stopsInPeriod)
+                }
+
+                // 2) Cierre mensual automático (según Desde/Hasta)
+                val key = periodKey()
+                val lastClosed = ExportPreferences.getLastClosedKey(context)
+                if (lastClosed != key) {
+                    // Lanzamos automáticamente el guardar como para el histórico (una vez por periodo)
+                    requestMonthlyClose(key)
+                } else {
+                    snackbarHostState.showSnackbar("✅ Export diario actualizado (periodo ya cerrado)")
+                }
+
+            } catch (e: Exception) {
+                // Si falla el diario (ej: el usuario borró el archivo en Drive), reconfigurar automáticamente
+                ExportPreferences.clearDailyFileUri(context)
+                snackbarHostState.showSnackbar("⚠️ Diario inválido. Vuelve a configurar el destino.")
+            } finally {
+                isExporting = false
+            }
         }
     }
 
@@ -500,7 +549,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Editar viaje
+    // ===== Diálogo editar viaje =====
     if (showEditDialog && editingTravelId != null) {
         val original = allTravels.firstOrNull { it.id == editingTravelId }
 
@@ -611,7 +660,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Scaffold
+    // Scaffold principal
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -674,7 +723,7 @@ fun ActivityHomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // IZQUIERDA KPIs
+            // IZQUIERDA KPIs + Export
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -720,24 +769,11 @@ fun ActivityHomeScreen(
                 KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo cerrados")
                 KpiLine("Δ Horas (objetivo - imputadas)", formatHours(deltaHoras), "positivo = faltan horas")
 
-                SectionDivider()
-
-                BlockTitle("Anual + Tesorería")
-                KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 enero")
-                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos no facturados")
-
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // ✅ Export: si hay carpeta guardada exporta; si no, abre picker con Drive
+                // ✅ EXPORT: 1 click. Si falta diario -> pide Guardar como. Si mes no cerrado -> abre Guardar como mensual automático.
                 Button(
-                    onClick = {
-                        val folderUri = ExportPreferences.getFolderUri(context)
-                        if (folderUri == null) {
-                            launchFolderPickerSaf()
-                        } else {
-                            smartExport(folderUri)
-                        }
-                    },
+                    onClick = { doSmartExport() },
                     enabled = !isExporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
@@ -751,8 +787,14 @@ fun ActivityHomeScreen(
                     }
                 }
 
-                TextButton(onClick = { launchFolderPickerSaf() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("⚙️ Cambiar carpeta de exportación")
+                TextButton(
+                    onClick = {
+                        ExportPreferences.clearDailyFileUri(context)
+                        requestDailyIfMissing()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("⚙️ Cambiar destino del CSV diario (AXIS_export_actual.csv)")
                 }
             }
 
@@ -766,10 +808,8 @@ fun ActivityHomeScreen(
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                     items(daysInRange) { day ->
                         val isWeekend = day.isWeekend()
-
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
-
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
@@ -940,40 +980,6 @@ private fun TravelRowCard(
             Text("€ ${formatCurrencyNumber(travel.billingExpected)}", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
         }
     }
-}
-
-private fun exportUnifiedCsvIO(
-    context: Context,
-    folderUri: Uri,
-    fileName: String,
-    travels: List<TravelEntity>,
-    stops: List<TravelStopEntity>
-) {
-    val resolver = context.contentResolver
-
-    // borrar si existe
-    resolver.query(
-        DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, DocumentsContract.getTreeDocumentId(folderUri)),
-        arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-        null, null, null
-    )?.use { cursor ->
-        while (cursor.moveToNext()) {
-            val documentId = cursor.getString(0)
-            val displayName = cursor.getString(1)
-            if (displayName == fileName) {
-                val fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, documentId)
-                DocumentsContract.deleteDocument(resolver, fileUri)
-                break
-            }
-        }
-    }
-
-    val newFileUri = DocumentsContract.createDocument(resolver, folderUri, "text/csv", fileName)
-        ?: throw IllegalStateException("No se pudo crear el archivo de export en Drive")
-
-    resolver.openOutputStream(newFileUri)?.use { stream ->
-        AxisUnifiedCsvExporter.writeCsv(stream, travels, stops)
-    } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento (export)")
 }
 
 private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
