@@ -1,6 +1,9 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -158,7 +161,7 @@ fun ActivityHomeScreen(
         }
     }
 
-    // ✅ NECESARIO para contar paradas del periodo
+    // ✅ NECESARIO para contador de paradas del periodo
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis != 0L && toMillis != 0L) {
             viewModel.setStopsRange(fromMillis, toMillis)
@@ -257,9 +260,7 @@ fun ActivityHomeScreen(
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
     val horasImputadasPeriodo by remember(periodTravels) {
-        derivedStateOf {
-            periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 }
-        }
+        derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
     }
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
@@ -283,13 +284,12 @@ fun ActivityHomeScreen(
     val yearStartMillis = remember {
         BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
     }
-    val nowEndMillis = remember {
-        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
-    }
+    val nowEndMillis = remember { BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone) }
     val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
     val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
+
     val pendienteFacturar by remember(allTravels) {
         derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
@@ -321,12 +321,39 @@ fun ActivityHomeScreen(
         }
     }
 
+    // ✅ Launcher de carpeta (SAF) forzando DocumentsUI para que salga Drive si está disponible
     val folderPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let {
-            ExportPreferences.saveFolderUri(context, it)
-            triggerExport(it)
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
+        val uri = result.data?.data ?: return@rememberLauncherForActivityResult
+
+        val flags = result.data?.flags ?: 0
+        val takeFlags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+
+        runCatching { context.contentResolver.takePersistableUriPermission(uri, takeFlags) }
+
+        ExportPreferences.saveFolderUri(context, uri)
+        triggerExport(uri)
+    }
+
+    fun launchFolderPickerSaf() {
+        val baseIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+
+        // 1) Intento forzar el picker del sistema
+        try {
+            baseIntent.setPackage("com.android.documentsui")
+            folderPickerLauncher.launch(baseIntent)
+        } catch (e: ActivityNotFoundException) {
+            // 2) Fallback: sin forzar paquete
+            baseIntent.setPackage(null)
+            folderPickerLauncher.launch(baseIntent)
+        } catch (_: Exception) {
+            baseIntent.setPackage(null)
+            folderPickerLauncher.launch(baseIntent)
         }
     }
 
@@ -404,10 +431,8 @@ fun ActivityHomeScreen(
                         label = { Text("Descripción (vacaciones)") },
                         modifier = Modifier.fillMaxWidth()
                     )
-
                     Text("Desde", fontWeight = FontWeight.SemiBold)
                     DatePicker(state = vacFromPickerState)
-
                     Text("Hasta", fontWeight = FontWeight.SemiBold)
                     DatePicker(state = vacToPickerState)
                 }
@@ -677,10 +702,15 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // ✅ Export: si hay carpeta guardada => exporta, si no => abre picker SAF
                 Button(
                     onClick = {
                         val folderUri = ExportPreferences.getFolderUri(context)
-                        if (folderUri == null) folderPickerLauncher.launch(null) else triggerExport(folderUri)
+                        if (folderUri == null) {
+                            launchFolderPickerSaf()
+                        } else {
+                            triggerExport(folderUri)
+                        }
                     },
                     enabled = !isExporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -693,6 +723,13 @@ fun ActivityHomeScreen(
                     } else {
                         Text("📤 EXPORTAR CSV A DRIVE", fontWeight = FontWeight.Bold)
                     }
+                }
+
+                TextButton(
+                    onClick = { launchFolderPickerSaf() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("⚙️ Cambiar carpeta de exportación")
                 }
             }
 
@@ -842,10 +879,7 @@ private fun TravelRowCard(
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDateOrToday(travel.startTimestamp, zone).format(dateFormatter)
 
-    Card(
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -974,9 +1008,7 @@ private fun buildVacationDescriptionsByDate(
         }
     }
 
-    return map.mapValues { (_, v) ->
-        v.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-    }
+    return map.mapValues { (_, v) -> v.map { it.trim() }.filter { it.isNotBlank() }.distinct() }
 }
 
 private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
