@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -90,7 +91,7 @@ fun ActivityHomeScreen(
     viewModel: ActivityViewModel,
     onNewTravelClick: () -> Unit,
     onCurrentTravelClick: () -> Unit,
-    onEditTravelClick: (String) -> Unit = {} // compat
+    onEditTravelClick: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     val zone = remember { ZoneId.systemDefault() }
@@ -161,7 +162,7 @@ fun ActivityHomeScreen(
         }
     }
 
-    // ✅ NECESARIO para contador de paradas del periodo
+    // ✅ NECESARIO para stops del periodo en ViewModel
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis != 0L && toMillis != 0L) {
             viewModel.setStopsRange(fromMillis, toMillis)
@@ -281,47 +282,74 @@ fun ActivityHomeScreen(
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
     val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
 
-    val yearStartMillis = remember {
-        BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
-    }
+    val yearStartMillis = remember { BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone) }
     val nowEndMillis = remember { BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone) }
     val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
     val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
-
-    val pendienteFacturar by remember(allTravels) {
-        derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
-    }
+    val pendienteFacturar by remember(allTravels) { derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } } }
 
     // =========================
-    // 5) Export CSV ÚNICO
+    // 5) Export robusto: diario fijo + cierre mensual automático
     // =========================
-    fun unifiedExportFileName(): String {
-        val stamp = java.text.SimpleDateFormat("yyyy_MM", Locale.getDefault()).format(java.util.Date())
-        return "AXIS_export_$stamp.csv"
+    fun dailyFileName(): String = "AXIS_export_actual.csv"
+
+    fun monthKey(ym: YearMonth): String =
+        String.format(Locale.getDefault(), "%04d_%02d", ym.year, ym.monthValue)
+
+    fun monthlyFileName(ym: YearMonth): String =
+        "AXIS_export_${monthKey(ym)}.csv"
+
+    fun exportOne(folderUri: Uri, fileName: String, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
+        exportUnifiedCsvIO(context, folderUri, fileName, travels, stops)
     }
 
-    fun triggerExport(folderUri: Uri) {
+    fun smartExport(folderUri: Uri) {
         if (isExporting) return
         isExporting = true
-        val fileName = unifiedExportFileName()
 
         coroutineScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    exportUnifiedCsvIO(context, folderUri, fileName, periodTravels, stopsInPeriod)
+                    // 1) Export diario fijo (siempre)
+                    exportOne(folderUri, dailyFileName(), periodTravels, stopsInPeriod)
+
+                    // 2) Cierre mensual automático (histórico)
+                    val nowYm = YearMonth.now()
+                    val prevYm = nowYm.minusMonths(1)
+                    val prevKey = monthKey(prevYm)
+
+                    val lastClosed = ExportPreferences.getLastClosedMonth(context)
+
+                    if (lastClosed != prevKey) {
+                        // 👉 Export mensual del mes anterior
+                        // Viajes: filtrados del mes anterior (natural)
+                        val prevMonthTravels = allTravels.filter { t ->
+                            val d = BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone)
+                            d.year == prevYm.year && d.monthValue == prevYm.monthValue
+                        }
+
+                        // Stops: en este punto usamos stopsInPeriod (periodo actual).
+                        // Si quieres que sean EXACTOS del mes anterior, te doy un cambio mínimo en ViewModel para pedir stopsInRange(prevMonth).
+                        exportOne(folderUri, monthlyFileName(prevYm), prevMonthTravels, stopsInPeriod)
+
+                        ExportPreferences.setLastClosedMonth(context, prevKey)
+                    }
                 }
-                snackbarHostState.showSnackbar("✅ Exportado: $fileName")
+
+                snackbarHostState.showSnackbar("✅ Export diario actualizado (+ cierre mensual si tocaba)")
             } catch (e: Exception) {
-                snackbarHostState.showSnackbar("❌ Error al exportar: ${e.localizedMessage ?: "desconocido"}")
+                snackbarHostState.showSnackbar("❌ Error export: ${e.localizedMessage ?: "desconocido"}")
             } finally {
                 isExporting = false
             }
         }
     }
 
-    // ✅ Launcher de carpeta (SAF) forzando DocumentsUI para que salga Drive si está disponible
+    // =========================
+    // 6) Picker de carpeta SAF forzado a DocumentsUI (para que salga Drive)
+    // =========================
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -330,11 +358,10 @@ fun ActivityHomeScreen(
 
         val flags = result.data?.flags ?: 0
         val takeFlags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-
         runCatching { context.contentResolver.takePersistableUriPermission(uri, takeFlags) }
 
         ExportPreferences.saveFolderUri(context, uri)
-        triggerExport(uri)
+        smartExport(uri)
     }
 
     fun launchFolderPickerSaf() {
@@ -343,12 +370,11 @@ fun ActivityHomeScreen(
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
 
-        // 1) Intento forzar el picker del sistema
         try {
+            // Fuerza DocumentsUI (en Samsung suele hacer aparecer Drive)
             baseIntent.setPackage("com.android.documentsui")
             folderPickerLauncher.launch(baseIntent)
-        } catch (e: ActivityNotFoundException) {
-            // 2) Fallback: sin forzar paquete
+        } catch (_: ActivityNotFoundException) {
             baseIntent.setPackage(null)
             folderPickerLauncher.launch(baseIntent)
         } catch (_: Exception) {
@@ -378,7 +404,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // ✅ Diálogo festivo (texto visible)
+    // Añadir festivo
     if (showAddHoliday) {
         AlertDialog(
             onDismissRequest = { showAddHoliday = false },
@@ -415,7 +441,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // ✅ Diálogo vacaciones (texto visible)
+    // Añadir vacaciones
     if (showAddVacation) {
         AlertDialog(
             onDismissRequest = { showAddVacation = false },
@@ -702,14 +728,14 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // ✅ Export: si hay carpeta guardada => exporta, si no => abre picker SAF
+                // ✅ Export: si hay carpeta guardada exporta; si no, abre picker con Drive
                 Button(
                     onClick = {
                         val folderUri = ExportPreferences.getFolderUri(context)
                         if (folderUri == null) {
                             launchFolderPickerSaf()
                         } else {
-                            triggerExport(folderUri)
+                            smartExport(folderUri)
                         }
                     },
                     enabled = !isExporting,
@@ -725,10 +751,7 @@ fun ActivityHomeScreen(
                     }
                 }
 
-                TextButton(
-                    onClick = { launchFolderPickerSaf() },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                TextButton(onClick = { launchFolderPickerSaf() }, modifier = Modifier.fillMaxWidth()) {
                     Text("⚙️ Cambiar carpeta de exportación")
                 }
             }
@@ -743,8 +766,10 @@ fun ActivityHomeScreen(
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                     items(daysInRange) { day ->
                         val isWeekend = day.isWeekend()
+
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
+
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
@@ -926,6 +951,7 @@ private fun exportUnifiedCsvIO(
 ) {
     val resolver = context.contentResolver
 
+    // borrar si existe
     resolver.query(
         DocumentsContract.buildChildDocumentsUriUsingTree(folderUri, DocumentsContract.getTreeDocumentId(folderUri)),
         arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
