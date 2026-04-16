@@ -8,6 +8,7 @@ import android.location.Location
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.CircularProgressIndicator
@@ -20,11 +21,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import java.util.Locale
 
 @Composable
 fun GpsAddressButton(
@@ -77,10 +78,7 @@ fun GpsAddressButton(
     @SuppressLint("MissingPermission")
     suspend fun getFreshLocation() {
         try {
-            val location = fusedLocationClient
-                .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
-                .await()
-
+            val location = fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null).await()
             if (location != null) {
                 fetchAddress(location)
             } else {
@@ -117,7 +115,7 @@ fun GpsAddressButton(
     }
 
     if (isFetchingLocation) {
-        CircularProgressIndicator(modifier = modifier.then(Modifier.padding(4.dp)), strokeWidth = 2.dp)
+        CircularProgressIndicator(modifier = modifier.padding(4.dp), strokeWidth = 2.dp)
     } else {
         IconButton(onClick = { onLocationClick() }, modifier = modifier) {
             Icon(Icons.Default.LocationOn, contentDescription = null)
