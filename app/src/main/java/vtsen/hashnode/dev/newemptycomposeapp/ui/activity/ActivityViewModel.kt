@@ -250,6 +250,12 @@ class ActivityViewModel(
         viewModelScope.launch { stopRepository.delete(stopId) }
     }
 
+    fun updateTravel(updated: vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity) {
+    viewModelScope.launch {
+        repository.insertTravel(updated) // REPLACE por id
+    }
+}
+
     // =========================
     // 5) VIAJES
     // =========================
