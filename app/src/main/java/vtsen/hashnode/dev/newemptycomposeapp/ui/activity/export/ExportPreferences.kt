@@ -6,16 +6,18 @@ import android.net.Uri
 object ExportPreferences {
     private const val PREFS = "axis_export_prefs"
 
-    // Compat (si antes guardabas carpeta)
+    // Carpeta AXIS en Drive (treeUri)
     private const val KEY_FOLDER_URI = "export_folder_uri"
 
-    // ✅ NUEVO: URI del archivo diario fijo
+    // Diario fijo (no necesario si usamos carpeta; lo dejo por compat)
     private const val KEY_DAILY_FILE_URI = "export_daily_file_uri"
 
-    // ✅ NUEVO: periodo cerrado (clave yyyy_MM basada en Desde/Hasta)
+    // Cierre mensual (según Desde/Hasta)
     private const val KEY_LAST_CLOSED_KEY = "export_last_closed_key"
 
-    // ---------- Carpeta (compat) ----------
+    // Backup diario últimos 7
+    private const val KEY_LAST_BACKUP_DATE = "export_last_backup_date" // yyyy_MM_dd
+
     fun saveFolderUri(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -36,7 +38,7 @@ object ExportPreferences {
             .apply()
     }
 
-    // ---------- Diario fijo ----------
+    // Compat (si alguna vez vuelves a modo "archivo fijo")
     fun saveDailyFileUri(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -57,7 +59,6 @@ object ExportPreferences {
             .apply()
     }
 
-    // ---------- Cierre mensual según Desde/Hasta ----------
     fun setLastClosedKey(context: Context, key: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -68,5 +69,17 @@ object ExportPreferences {
     fun getLastClosedKey(context: Context): String? {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_LAST_CLOSED_KEY, null)
+    }
+
+    fun setLastBackupDate(context: Context, yyyyMmDd: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_LAST_BACKUP_DATE, yyyyMmDd)
+            .apply()
+    }
+
+    fun getLastBackupDate(context: Context): String? {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_LAST_BACKUP_DATE, null)
     }
 }
