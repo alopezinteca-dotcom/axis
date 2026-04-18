@@ -1,11 +1,13 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -71,7 +73,6 @@ import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.backup.BackupManager
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.backup.BackupSnapshot
@@ -222,9 +223,15 @@ fun ActivityHomeScreen(
     val holidayByDateInPeriod by remember(holidaysInPeriod) {
         derivedStateOf { holidaysInPeriod.associateBy { it.date } }
     }
+    val holidayDatesInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
+    }
 
     val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { allVacations.filter { v -> !(v.to.isBefore(fromDate) || v.from.isAfter(toDate)) } }
+    }
+    val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
+        derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
     }
     val vacationDescsByDateInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
         derivedStateOf { buildVacationDescriptionsByDate(vacationsInPeriod, fromDate, toDate) }
@@ -255,23 +262,14 @@ fun ActivityHomeScreen(
     // 4) KPI
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
-
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
     }
-
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { t -> ((t.kmEnd ?: t.kmStart) - t.kmStart).coerceAtLeast(0) }
         }
-    }
-
-    val holidayDatesInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
-    }
-    val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
-        derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
     }
 
     val diasLaborablesReales by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
@@ -282,7 +280,6 @@ fun ActivityHomeScreen(
         }
     }
     val diasLaborables = if (diasLaborablesReales < 0) 0 else diasLaborablesReales
-
     val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
     val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
@@ -300,9 +297,8 @@ fun ActivityHomeScreen(
     val pendienteFacturar by remember(allTravels) { derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } } }
 
     // =========================
-    // 5) EXPORT Drive folder (AXIS) + backups + restore
+    // 5) DRIVE (AXIS folder) + EXPORT + BACKUP + RESTORE
     // =========================
-
     fun axisFolderUri(): Uri? = ExportPreferences.getFolderUri(context)
 
     fun periodKey(): String {
@@ -318,10 +314,10 @@ fun ActivityHomeScreen(
         return String.format(Locale.getDefault(), "%04d_%02d_%02d", now.year, now.monthValue, now.dayOfMonth)
     }
 
-    // Folder picker via StartActivityForResult to capture flags robustly
+    // Folder picker result (force DocumentsUI first) so Drive appears
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
-    ) { result ->
+    ) { result: ActivityResult ->
         if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
         val uri = result.data?.data ?: return@rememberLauncherForActivityResult
 
@@ -339,6 +335,19 @@ fun ActivityHomeScreen(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
+
+        // 1) Try DocumentsUI (shows Drive)
+        try {
+            intent.setPackage("com.android.documentsui")
+            folderPickerLauncher.launch(intent)
+            return
+        } catch (_: ActivityNotFoundException) {
+            // 2) fallback
+        } catch (_: Exception) {
+            // 2) fallback
+        }
+
+        intent.setPackage(null)
         folderPickerLauncher.launch(intent)
     }
 
@@ -408,49 +417,24 @@ fun ActivityHomeScreen(
         return null
     }
 
-    fun ensureDir(parentTreeUri: Uri, parentDocId: String, dirName: String): Uri {
+    suspend fun writeCsvIntoAxisRoot(axisTreeUri: Uri, fileName: String, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
         val resolver = context.contentResolver
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parentTreeUri, parentDocId)
-        resolver.query(
-            childrenUri,
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                DocumentsContract.Document.COLUMN_MIME_TYPE
-            ),
-            null, null, null
-        )?.use { c ->
-            while (c.moveToNext()) {
-                val docId = c.getString(0)
-                val name = c.getString(1)
-                val mime = c.getString(2)
-                if (name == dirName && mime == DocumentsContract.Document.MIME_TYPE_DIR) {
-                    return DocumentsContract.buildDocumentUriUsingTree(parentTreeUri, docId)
-                }
-            }
-        }
+        val axisDocId = DocumentsContract.getTreeDocumentId(axisTreeUri)
 
-        val newDirUri = DocumentsContract.createDocument(
-            resolver,
-            parentTreeUri,
-            DocumentsContract.Document.MIME_TYPE_DIR,
-            dirName
-        ) ?: throw IllegalStateException("No se pudo crear carpeta $dirName")
-
-        return newDirUri
-    }
-
-    suspend fun writeCsvIntoDir(dirTreeUri: Uri, fileName: String, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
-        val resolver = context.contentResolver
-        val dirDocId = DocumentsContract.getDocumentId(dirTreeUri)
-
-        val existingId = findChildDocIdByName(dirTreeUri, dirDocId, fileName)
+        // Try overwrite existing first
+        val existingId = findChildDocIdByName(axisTreeUri, axisDocId, fileName)
         if (existingId != null) {
-            val existingUri = DocumentsContract.buildDocumentUriUsingTree(dirTreeUri, existingId)
-            runCatching { DocumentsContract.deleteDocument(resolver, existingUri) }
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(axisTreeUri, existingId)
+            val ok = runCatching {
+                resolver.openOutputStream(docUri, "wt")?.use { out ->
+                    AxisUnifiedCsvExporter.writeCsv(out, travels, stops)
+                } ?: throw IllegalStateException("No OutputStream")
+            }.isSuccess
+            if (ok) return
+            runCatching { DocumentsContract.deleteDocument(resolver, docUri) }
         }
 
-        val newFileUri = DocumentsContract.createDocument(resolver, dirTreeUri, "text/csv", fileName)
+        val newFileUri = DocumentsContract.createDocument(resolver, axisTreeUri, "text/csv", fileName)
             ?: throw IllegalStateException("No se pudo crear $fileName")
 
         resolver.openOutputStream(newFileUri, "wt")?.use { out ->
@@ -467,13 +451,7 @@ fun ActivityHomeScreen(
         val json = BackupManager.snapshotToJson(snapshot)
         val gz = BackupManager.writeSnapshotToGzipBytes(json)
 
-        val backupsDirUri = runCatching { BackupManager.ensureBackupsDir(context, axisTreeUri) }
-            .getOrElse {
-                // fallback: create backups folder ourselves
-                val axisDocId = DocumentsContract.getTreeDocumentId(axisTreeUri)
-                ensureDir(axisTreeUri, axisDocId, "backups")
-            }
-
+        val backupsDirUri = BackupManager.ensureBackupsDir(context, axisTreeUri)
         BackupManager.writeBytesToDocument(
             context = context,
             parentDirUri = backupsDirUri,
@@ -497,18 +475,18 @@ fun ActivityHomeScreen(
             try {
                 isExporting = true
                 withContext(Dispatchers.IO) {
-                    // 1) CSV diario fijo en raíz AXIS
-                    writeCsvIntoDir(axis, dailyCsvName(), periodTravels, stopsInPeriod)
+                    // 1) CSV diario fijo
+                    writeCsvIntoAxisRoot(axis, dailyCsvName(), periodTravels, stopsInPeriod)
 
                     // 2) Cierre mensual automático según toDate
                     val key = periodKey()
                     val lastClosed = ExportPreferences.getLastClosedKey(context)
                     if (lastClosed != key) {
-                        writeCsvIntoDir(axis, monthlyCsvName(key), periodTravels, stopsInPeriod)
+                        writeCsvIntoAxisRoot(axis, monthlyCsvName(key), periodTravels, stopsInPeriod)
                         ExportPreferences.setLastClosedKey(context, key)
                     }
 
-                    // 3) Backup diario (1 vez al día) a backups/
+                    // 3) Backup diario (1 vez al día)
                     maybeDailyBackup(axis)
                 }
                 snackbarHostState.showSnackbar("✅ Export OK (CSV + backup si tocaba)")
@@ -541,7 +519,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Añadir festivo
+    // Diálogo añadir festivo
     if (showAddHoliday) {
         AlertDialog(
             onDismissRequest = { showAddHoliday = false },
@@ -578,7 +556,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Añadir vacaciones
+    // Diálogo añadir vacaciones
     if (showAddVacation) {
         AlertDialog(
             onDismissRequest = { showAddVacation = false },
@@ -812,7 +790,7 @@ fun ActivityHomeScreen(
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
 
-            // IZQUIERDA
+            // IZQUIERDA KPIs + Export + Restore
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -831,14 +809,18 @@ fun ActivityHomeScreen(
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = {
-                                val (mStart, mEnd) = currentMonthRangeMillis(zone)
-                                coroutineScope.launch { BillingPeriodStore.savePeriod(context, mStart, mEnd) }
-                            }, modifier = Modifier.weight(1f)) { Text("Este mes") }
+                            Button(
+                                onClick = {
+                                    val (mStart, mEnd) = currentMonthRangeMillis(zone)
+                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, mStart, mEnd) }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Este mes") }
 
-                            Button(onClick = {
-                                coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) }
-                            }, modifier = Modifier.weight(1f)) { Text("Reset") }
+                            Button(
+                                onClick = { coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) } },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Reset") }
                         }
                     }
                 }
@@ -925,20 +907,10 @@ fun ActivityHomeScreen(
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
-                        DayHeader(
-                            day = day,
-                            dateFormatter = dateFormatter,
-                            localeEs = localeEs,
-                            isWeekend = isWeekend,
-                            isHoliday = isHoliday,
-                            isVacation = isVacation
-                        )
+                        DayHeader(day, dateFormatter, localeEs, isWeekend, isHoliday, isVacation)
 
                         if (holiday != null) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🎉 FESTIVO", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                                     val desc = holiday.description.trim()
@@ -946,10 +918,7 @@ fun ActivityHomeScreen(
                                 }
                             }
                         } else if (isVacation) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🏖️ VACACIONES", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
                                     val cleaned = vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -960,10 +929,7 @@ fun ActivityHomeScreen(
 
                         val stopCount = stopsCountByDay[day] ?: 0
                         if (stopCount > 0) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text("📍 $stopCount", fontWeight = FontWeight.Bold)
                                 }
@@ -1032,7 +998,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   JSON parse + Helpers UI + Date
+   Snapshot parse + Backup pruning
    ========================= */
 
 private fun parseSnapshotJson(json: String): BackupSnapshot {
@@ -1149,7 +1115,7 @@ private fun pruneOldBackups(context: Context, backupsDirUri: Uri, keep: Int) {
         }
     }
 
-    val sorted = entries.sortedByDescending { it.first } // YYYY_MM_DD ordena cronológicamente
+    val sorted = entries.sortedByDescending { it.first } // YYYY_MM_DD => orden cronológico
     val toDelete = if (sorted.size > keep) sorted.drop(keep) else emptyList()
 
     toDelete.forEach { (_, docId) ->
@@ -1157,6 +1123,10 @@ private fun pruneOldBackups(context: Context, backupsDirUri: Uri, keep: Int) {
         runCatching { DocumentsContract.deleteDocument(resolver, uri) }
     }
 }
+
+/* =========================
+   UI helpers
+   ========================= */
 
 @Composable
 private fun BlockTitle(text: String) {
@@ -1197,7 +1167,10 @@ private fun TravelRowCard(
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDateOrToday(travel.startTimestamp, zone).format(dateFormatter)
 
-    Card(elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth()) {
+    Card(
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1208,7 +1181,6 @@ private fun TravelRowCard(
                     Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
                     Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onEdit) { Text("✏️") }
                     TextButton(onClick = onDelete) { Text("🗑️") }
@@ -1235,6 +1207,10 @@ private fun TravelRowCard(
         }
     }
 }
+
+/* =========================
+   Date helpers
+   ========================= */
 
 private fun currentMonthRangeMillis(zone: ZoneId): Pair<Long, Long> {
     val now = LocalDate.now()
