@@ -16,8 +16,15 @@ interface TravelStopDao {
     fun getStopsInRange(fromMillis: Long, toMillis: Long): Flow<List<TravelStopEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertStop(stop: TravelStopEntity)
+    suspend fun upsert(stop: TravelStopEntity)
 
-    @Query("DELETE FROM travel_stops WHERE id = :stopId")
-    suspend fun deleteStop(stopId: String)
+    @Query("DELETE FROM travel_stops WHERE id = :id")
+    suspend fun delete(id: String)
+
+    // ✅ Restore
+    @Query("DELETE FROM travel_stops")
+    suspend fun deleteAllStops()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertStops(stops: List<TravelStopEntity>)
 }
