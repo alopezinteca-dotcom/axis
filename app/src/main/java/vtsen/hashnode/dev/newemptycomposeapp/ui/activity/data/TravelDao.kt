@@ -9,53 +9,39 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TravelDao {
 
-    // ---------- OBSERVABLES ----------
+    // ===== Flows que tu TravelRepository YA está usando =====
     @Query("SELECT * FROM travels ORDER BY startTimestamp DESC")
-    fun observeAllTravels(): Flow<List<TravelEntity>>
+    fun getAllTravels(): Flow<List<TravelEntity>>
 
-    /**
-     * TravelStatus suele guardarse como String (con TypeConverter) o como ordinal.
-     * En tu app lo estás tratando como enum name (IN_PROGRESS/CLOSED).
-     */
-    @Query("SELECT * FROM travels WHERE status = :status ORDER BY startTimestamp DESC LIMIT 1")
-    fun observeCurrentTravel(status: String = "IN_PROGRESS"): Flow<TravelEntity?>
+    @Query("SELECT * FROM travels WHERE status = 'IN_PROGRESS' ORDER BY startTimestamp DESC LIMIT 1")
+    fun getCurrentTravel(): Flow<TravelEntity?>
 
-    @Query("SELECT * FROM travels WHERE status = :status ORDER BY startTimestamp DESC")
-    fun observeTravelsByStatus(status: String = "CLOSED"): Flow<List<TravelEntity>>
+    @Query("SELECT * FROM travels WHERE status = 'CLOSED' ORDER BY startTimestamp DESC")
+    fun getClosedTravels(): Flow<List<TravelEntity>>
 
-    // ---------- CRUD ----------
+    // ===== Insert / Update base =====
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTravel(travel: TravelEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertTravels(travels: List<TravelEntity>)
 
     @Query("DELETE FROM travels WHERE id = :id")
     suspend fun deleteTravel(id: String)
 
-    @Query("DELETE FROM travels")
-    suspend fun deleteAllTravels()
-
-    // ---------- UPDATES SIMPLES ----------
-    @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
-    suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
-
     @Query("UPDATE travels SET kmStart = :kmStart WHERE id = :id")
     suspend fun updateKmStart(id: String, kmStart: Int)
+
+    @Query("UPDATE travels SET hoursDraft = :hoursDraft WHERE id = :id")
+    suspend fun updateHoursDraft(id: String, hoursDraft: Double?)
 
     @Query("UPDATE travels SET isInvoiced = :isInvoiced WHERE id = :id")
     suspend fun setInvoiced(id: String, isInvoiced: Boolean)
 
-    @Query("UPDATE travels SET endAddress = :endAddress WHERE id = :id")
-    suspend fun updateEndAddress(id: String, endAddress: String)
-
-    // ---------- CIERRE DE VIAJE ----------
+    // ===== Cierre de viaje =====
     @Query(
         """
         UPDATE travels SET
             kmEnd = :kmEnd,
             endTimestamp = :endTimestamp,
-            status = :status,
+            status = 'CLOSED',
             hoursCalculatedSnapshot = :hoursCalculatedSnapshot,
             hoursImputed = :hoursImputed,
             hoursModified = :hoursModified,
@@ -84,7 +70,13 @@ interface TravelDao {
         snapPorcBenefExigidoA: Double,
         snapCosteHoraAlejandro: Double,
         snapCosteHoraEmpresaX: Double,
-        snapTarifaObjetivoY: Double,
-        status: String = "CLOSED"
+        snapTarifaObjetivoY: Double
     )
+
+    // ===== Restore (wipe + upsert) =====
+    @Query("DELETE FROM travels")
+    suspend fun deleteAllTravels()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertTravels(travels: List<TravelEntity>)
 }
