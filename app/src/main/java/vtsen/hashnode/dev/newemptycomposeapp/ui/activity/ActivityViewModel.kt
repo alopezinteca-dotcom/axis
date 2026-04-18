@@ -2,7 +2,6 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
@@ -18,16 +17,18 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.backup.BackupSnapshot
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopRepository
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisUnifiedCsvExporter
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 
 data class ParamSnapshots(
     val costeKmOperativo: Double,
@@ -39,7 +40,7 @@ data class ParamSnapshots(
 )
 
 class ActivityViewModel(
-    private val appContext: Context, // pasa applicationContext al crear el VM
+    private val appContext: Context,
     private val repository: TravelRepository,
     private val stopRepository: TravelStopRepository
 ) : ViewModel() {
@@ -51,7 +52,8 @@ class ActivityViewModel(
     // =========================
 
     /**
-     * ✅ Fallback válido (mes actual) para evitar (0,0) y evitar pantalla vacía al abrir.
+     * Si tienes implementado periodFlowResolved/ensureInitialized en BillingPeriodStore,
+     * úsalo; si no, cambia por periodFlowRaw.
      */
     val billingPeriod: StateFlow<BillingPeriod> =
         BillingPeriodStore.periodFlowResolved(appContext, zone)
@@ -62,9 +64,6 @@ class ActivityViewModel(
                 initialValue = BillingPeriodStore.currentMonthRangeMillis(zone)
             )
 
-    /**
-     * Mantengo fromDate/toDate por compatibilidad (puedes migrar a periodDates).
-     */
     val fromDate: StateFlow<LocalDate> =
         billingPeriod
             .map { BillingPeriodStore.millisToLocalDateOrToday(it.fromMillis, zone) }
@@ -75,9 +74,6 @@ class ActivityViewModel(
             .map { BillingPeriodStore.millisToLocalDateOrToday(it.toMillis, zone) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalDate.now(zone))
 
-    /**
-     * ✅ Pro: un solo flow con ambas fechas (menos collectors en UI).
-     */
     val periodDates: StateFlow<Pair<LocalDate, LocalDate>> =
         billingPeriod
             .map {
@@ -91,26 +87,19 @@ class ActivityViewModel(
             )
 
     init {
-        // ✅ Garantiza que si estaba vacío o mal, se persiste el default.
         viewModelScope.launch {
             BillingPeriodStore.ensureInitialized(appContext, zone)
         }
     }
 
     fun setBillingPeriodDates(from: LocalDate, to: LocalDate) {
-        // ✅ Normaliza para evitar bugs si el usuario invierte
         val a = if (from.isAfter(to)) to else from
         val b = if (from.isAfter(to)) from else to
-
-        viewModelScope.launch {
-            BillingPeriodStore.savePeriodDates(appContext, a, b, zone)
-        }
+        viewModelScope.launch { BillingPeriodStore.savePeriodDates(appContext, a, b, zone) }
     }
 
     fun setBillingPeriodMillis(fromMillis: Long, toMillis: Long) {
-        viewModelScope.launch {
-            BillingPeriodStore.savePeriod(appContext, fromMillis, toMillis)
-        }
+        viewModelScope.launch { BillingPeriodStore.savePeriod(appContext, fromMillis, toMillis) }
     }
 
     fun resetBillingToThisMonth() {
@@ -159,26 +148,18 @@ class ActivityViewModel(
         )
 
     // =========================
-    // 3) Stops del periodo (timeline) — PRO: normalizado, distinct, sin debounce
+    // 3) Stops del periodo (timeline)
     // =========================
 
     val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
         billingPeriod
-            .map { p ->
-                // defensivo: por si viniese invertido
-                if (p.fromMillis <= p.toMillis) p else BillingPeriod(p.toMillis, p.fromMillis)
-            }
+            .map { p -> if (p.fromMillis <= p.toMillis) p else BillingPeriod(p.toMillis, p.fromMillis) }
             .distinctUntilChanged()
             .flatMapLatest { p ->
                 val from = p.fromMillis
                 val to = p.toMillis
-                if (from <= 0L || to <= 0L) {
-                    flowOf(emptyList())
-                } else {
-                    stopRepository
-                        .stopsInRange(from, to)
-                        .distinctUntilChanged()
-                }
+                if (from <= 0L || to <= 0L) flowOf(emptyList())
+                else stopRepository.stopsInRange(from, to).distinctUntilChanged()
             }
             .stateIn(
                 scope = viewModelScope,
@@ -187,7 +168,7 @@ class ActivityViewModel(
             )
 
     /**
-     * ✅ Compatibilidad: antes setStopsRange mutaba un range interno.
+     * Compatibilidad con tu UI: antes setStopsRange mutaba un range interno.
      * Ahora: escribe periodo en DataStore (source of truth).
      */
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
@@ -250,7 +231,6 @@ class ActivityViewModel(
         viewModelScope.launch { stopRepository.delete(stopId) }
     }
 
-    
     // =========================
     // 5) VIAJES
     // =========================
@@ -295,12 +275,10 @@ class ActivityViewModel(
     }
 
     /**
-     * ✅ Seguro: usa tu upsert REPLACE (no depende de @Update).
+     * ✅ Solo una versión (evita overload duplicado)
      */
     fun updateTravel(updated: TravelEntity) {
-        viewModelScope.launch {
-            repository.insertTravel(updated)
-        }
+        viewModelScope.launch { repository.insertTravel(updated) }
     }
 
     fun deleteTravel(travelId: String) {
@@ -363,88 +341,75 @@ class ActivityViewModel(
         return true
     }
 
-    fun prepareExport() {
-        // compat
+    // =========================
+    // 6) BACKUP / RESTORE (Opción A: TODO)
+    // =========================
+
+    suspend fun buildSnapshotForBackup(): BackupSnapshot {
+        // Periodo
+        val bp = BillingPeriodStore.periodFlowRaw(appContext).first()
+
+        // Calendario
+        val holidays = CalendarOverridesStore.holidaysFlow(appContext).first()
+        val vacations = CalendarOverridesStore.vacationsFlow(appContext).first()
+
+        // Datos
+        val travels = allTravels.value
+        val stops = stopsInPeriod.value
+        // Si quieres TODO stops históricos (no solo rango), habría que exponer un flow de todos los stops.
+        // De momento mantiene coherencia con tu rango de exportación.
+
+        return BackupSnapshot(
+            createdAtMillis = System.currentTimeMillis(),
+            billingPeriod = bp,
+            holidays = holidays,
+            vacations = vacations,
+            travels = travels,
+            stops = stops
+        )
+    }
+
+    suspend fun restoreFromSnapshot(snapshot: BackupSnapshot) {
+        // 1) Wipe total
+        repository.deleteAll()
+        stopRepository.deleteAll()
+
+        // 2) Restore datos
+        repository.upsertAll(snapshot.travels)
+        stopRepository.upsertAll(snapshot.stops)
+
+        // 3) Restore calendario (primero borrar lo actual)
+        val existingH = CalendarOverridesStore.holidaysFlow(appContext).first()
+        existingH.forEach { h ->
+            CalendarOverridesStore.removeHolidayRaw(appContext, CalendarOverridesStore.toRawHoliday(h))
+        }
+        val existingV = CalendarOverridesStore.vacationsFlow(appContext).first()
+        existingV.forEach { v ->
+            CalendarOverridesStore.removeVacationRaw(appContext, CalendarOverridesStore.toRawVacation(v))
+        }
+
+        snapshot.holidays.forEach { h ->
+            CalendarOverridesStore.addHoliday(appContext, h.date, h.description)
+        }
+        snapshot.vacations.forEach { v ->
+            CalendarOverridesStore.addVacation(appContext, v.from, v.to, v.description)
+        }
+
+        // 4) Restore periodo
+        snapshot.billingPeriod?.let { p ->
+            BillingPeriodStore.savePeriod(appContext, p.fromMillis, p.toMillis)
+        }
     }
 
     // =========================
-    // 6) EXPORT (FUNCIONAL)
+    // 7) Export flags (si los usas en UI)
     // =========================
-
     private val _isExporting = MutableStateFlow(false)
     val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
 
     private val _exportError = MutableStateFlow<String?>(null)
     val exportError: StateFlow<String?> = _exportError.asStateFlow()
 
-    /**
-     * Exporta CSV al folderUri (SAF / Drive). Borra si existe.
-     * Mantén tu fileName determinista desde UI.
-     */
-    fun exportUnifiedCsv(folderUri: Uri, fileName: String) {
-        if (_isExporting.value) return
-
-        val travelsSnapshot = allTravels.value
-        val stopsSnapshot = stopsInPeriod.value
-
-        viewModelScope.launch {
-            _isExporting.value = true
-            _exportError.value = null
-            try {
-                withContext(Dispatchers.IO) {
-                    exportUnifiedCsvIO(
-                        context = appContext,
-                        folderUri = folderUri,
-                        fileName = fileName,
-                        travels = travelsSnapshot,
-                        stops = stopsSnapshot
-                    )
-                }
-            } catch (e: Exception) {
-                _exportError.value = e.localizedMessage ?: "Error desconocido"
-            } finally {
-                _isExporting.value = false
-            }
-        }
-    }
-
-    private fun exportUnifiedCsvIO(
-        context: Context,
-        folderUri: Uri,
-        fileName: String,
-        travels: List<TravelEntity>,
-        stops: List<TravelStopEntity>
-    ) {
-        val resolver = context.contentResolver
-
-        // borrar si existe
-        resolver.query(
-            DocumentsContract.buildChildDocumentsUriUsingTree(
-                folderUri,
-                DocumentsContract.getTreeDocumentId(folderUri)
-            ),
-            arrayOf(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME
-            ),
-            null, null, null
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val documentId = cursor.getString(0)
-                val displayName = cursor.getString(1)
-                if (displayName == fileName) {
-                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(folderUri, documentId)
-                    DocumentsContract.deleteDocument(resolver, fileUri)
-                    break
-                }
-            }
-        }
-
-        val newFileUri = DocumentsContract.createDocument(resolver, folderUri, "text/csv", fileName)
-            ?: throw IllegalStateException("No se pudo crear el archivo de export en Drive")
-
-        resolver.openOutputStream(newFileUri)?.use { stream ->
-            AxisUnifiedCsvExporter.writeCsv(stream, travels, stops)
-        } ?: throw IllegalStateException("No se pudo abrir OutputStream del documento (export)")
-    }
+    fun setExporting(value: Boolean) { _isExporting.value = value }
+    fun setExportError(msg: String?) { _exportError.value = msg }
 }
