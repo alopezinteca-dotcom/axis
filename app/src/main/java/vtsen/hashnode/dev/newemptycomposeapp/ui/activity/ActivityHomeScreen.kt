@@ -1352,3 +1352,35 @@ private fun DayHeader(
         }
     }
 }
+private fun pruneOldBackups(context: Context, backupsDirUri: Uri, keep: Int) {
+    val resolver = context.contentResolver
+    val dirDocId = DocumentsContract.getDocumentId(backupsDirUri)
+    val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(backupsDirUri, dirDocId)
+
+    val entries = mutableListOf<Pair<String, String>>() // (name, docId)
+
+    resolver.query(
+        childrenUri,
+        arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME
+        ),
+        null, null, null
+    )?.use { c ->
+        while (c.moveToNext()) {
+            val docId = c.getString(0)
+            val name = c.getString(1)
+            if (name.startsWith("AXIS_backup_") && name.endsWith(".json.gz")) {
+                entries.add(name to docId)
+            }
+        }
+    }
+
+    val sorted = entries.sortedByDescending { it.first } // lexicográfico = cronológico por YYYY_MM_DD
+    val toDelete = if (sorted.size > keep) sorted.drop(keep) else emptyList()
+
+    toDelete.forEach { (_, docId) ->
+        val uri = DocumentsContract.buildDocumentUriUsingTree(backupsDirUri, docId)
+        runCatching { DocumentsContract.deleteDocument(resolver, uri) }
+    }
+}
