@@ -1,5 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -70,6 +71,8 @@ import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.backup.BackupManager
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.backup.BackupSnapshot
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
@@ -81,6 +84,8 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementD
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
+import org.json.JSONArray
+import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -97,6 +102,7 @@ fun ActivityHomeScreen(
 
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
+
     var isExporting by remember { mutableStateOf(false) }
 
     val allTravels by viewModel.allTravels.collectAsStateWithLifecycle()
@@ -159,7 +165,7 @@ fun ActivityHomeScreen(
         }
     }
 
-    // ✅ NECESARIO para stops del periodo en ViewModel
+    // Stops del periodo (timeline) — VM usa el periodo como source of truth
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis != 0L && toMillis != 0L) {
             viewModel.setStopsRange(fromMillis, toMillis)
@@ -190,10 +196,11 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 2) Festivos + Vacaciones
+    // 2) Festivos + Vacaciones (manual)
     // =========================
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
+
     var showCalendarManager by remember { mutableStateOf(false) }
 
     var showAddHoliday by remember { mutableStateOf(false) }
@@ -248,8 +255,7 @@ fun ActivityHomeScreen(
     }
 
     val stopsCountByDay = remember(stopsInPeriod, zone) {
-        stopsInPeriod
-            .groupBy { s -> BillingPeriodStore.millisToLocalDateOrToday(s.timestamp, zone) }
+        stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDateOrToday(s.timestamp, zone) }
             .mapValues { it.value.size }
     }
 
@@ -257,9 +263,11 @@ fun ActivityHomeScreen(
     // 4) KPI
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) { derivedStateOf { periodTravels.sumOf { it.billingExpected } } }
+
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
     }
+
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
@@ -279,8 +287,12 @@ fun ActivityHomeScreen(
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
     val deltaHoras by remember(horasObjetivo, horasImputadasPeriodo) { derivedStateOf { horasObjetivo - horasImputadasPeriodo } }
 
-    val yearStartMillis = remember { BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone) }
-    val nowEndMillis = remember { BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone) }
+    val yearStartMillis = remember {
+        BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
+    }
+    val nowEndMillis = remember {
+        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
+    }
     val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
@@ -288,144 +300,243 @@ fun ActivityHomeScreen(
     val pendienteFacturar by remember(allTravels) { derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } } }
 
     // =========================
-    // 5) EXPORT: diario fijo + cierre mensual automático (según Desde/Hasta)
+    // 5) EXPORT a carpeta AXIS en Drive + BACKUPS/ + RESTORE
     // =========================
 
-    fun dailyFileName(): String = "AXIS_export_actual.csv"
+    fun axisFolderUri(): Uri? = ExportPreferences.getFolderUri(context)
 
-    // clave del periodo para “cierre mensual según Desde/Hasta”
-    // Usamos el mes de TO (hasta) como referencia de cierre del periodo
     fun periodKey(): String {
         val ym = java.time.YearMonth.of(toDate.year, toDate.monthValue)
         return String.format(Locale.getDefault(), "%04d_%02d", ym.year, ym.monthValue)
     }
 
-    fun monthlyFileNameForKey(key: String): String = "AXIS_export_$key.csv"
+    fun dailyCsvName(): String = "AXIS_export_actual.csv"
+    fun monthlyCsvName(key: String): String = "AXIS_export_$key.csv"
 
-    suspend fun writeCsvToUri(uri: Uri, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
-        // ✅ "wt" = overwrite + truncate (Drive se comporta mejor)
-        context.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
-            AxisUnifiedCsvExporter.writeCsv(stream, travels, stops)
-        } ?: throw IllegalStateException("No se pudo abrir OutputStream")
+    fun todayKey(): String {
+        val now = LocalDate.now()
+        return String.format(Locale.getDefault(), "%04d_%02d_%02d", now.year, now.monthValue, now.dayOfMonth)
     }
 
-    // Estado interno: cuando toque cerrar, guardamos el key pendiente
-    var pendingCloseKey by remember { mutableStateOf<String?>(null) }
-
-    // Launcher 1: configurar (o reparar) el archivo diario fijo (Drive)
-    val dailyCreateLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
+    // ---- Pick carpeta AXIS (Drive) ----
+    val pickAxisFolderLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
     ) { uri: Uri? ->
-        if (uri == null) {
-            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ No se configuró el archivo diario.") }
-            return@rememberLauncherForActivityResult
-        }
+        if (uri == null) return@rememberLauncherForActivityResult
 
-        // Intentar persistir permisos (puede fallar en algunos providers, no pasa nada)
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
+        // Persistir permisos (clave para no volver a pedir) — SAF [1](https://www.scoro.com/blog/billable-utilization/)[2](https://agencypro.app/glossary/billable-utilization)
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
 
-        ExportPreferences.saveDailyFileUri(context, uri)
+        ExportPreferences.saveFolderUri(context, uri)
+        coroutineScope.launch { snackbarHostState.showSnackbar("✅ Carpeta AXIS configurada") }
+    }
 
-        // Escribimos inmediatamente el diario para validar que funciona
+    // ---- Restore picker: eliges .json.gz ----
+    var showRestoreConfirm by remember { mutableStateOf(false) }
+    var pendingSnapshot by remember { mutableStateOf<BackupSnapshot?>(null) }
+
+    val pickBackupFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
         coroutineScope.launch {
             try {
-                isExporting = true
-                withContext(Dispatchers.IO) {
-                    writeCsvToUri(uri, periodTravels, stopsInPeriod)
-                }
-                snackbarHostState.showSnackbar("✅ Diario configurado y exportado: ${dailyFileName()}")
+                val bytes = withContext(Dispatchers.IO) { BackupManager.readBytesFromUri(context, uri) }
+                val json = withContext(Dispatchers.IO) { BackupManager.readGzipBytesToString(bytes) }
+                val snapshot = parseSnapshotJson(json)
+                pendingSnapshot = snapshot
+                showRestoreConfirm = true
             } catch (e: Exception) {
-                ExportPreferences.clearDailyFileUri(context)
-                snackbarHostState.showSnackbar("❌ No se pudo escribir en el diario. Reintenta configurar.")
-            } finally {
-                isExporting = false
+                snackbarHostState.showSnackbar("❌ No se pudo leer el backup: ${e.localizedMessage ?: "desconocido"}")
             }
         }
     }
 
-    // Launcher 2: cierre mensual (solo cuando toque). No guardamos URI, solo cerramos y marcamos key.
-    val monthlyCreateLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
-    ) { uri: Uri? ->
-        val key = pendingCloseKey
-        pendingCloseKey = null
+    // Confirm restore (wipe + restore)
+    if (showRestoreConfirm && pendingSnapshot != null) {
+        AlertDialog(
+            onDismissRequest = { showRestoreConfirm = false },
+            title = { Text("Restaurar backup") },
+            text = { Text("⚠️ Esto borrará los datos actuales y restaurará TODO desde el backup. ¿Continuar?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    val snap = pendingSnapshot!!
+                    pendingSnapshot = null
+                    showRestoreConfirm = false
 
-        if (uri == null || key == null) {
-            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ Cierre mensual cancelado.") }
-            return@rememberLauncherForActivityResult
-        }
+                    coroutineScope.launch {
+                        try {
+                            isExporting = true
+                            withContext(Dispatchers.IO) { viewModel.restoreFromSnapshot(snap) }
+                            snackbarHostState.showSnackbar("✅ Restauración completa")
+                        } catch (e: Exception) {
+                            snackbarHostState.showSnackbar("❌ Error restaurando: ${e.localizedMessage ?: "desconocido"}")
+                        } finally {
+                            isExporting = false
+                        }
+                    }
+                }) { Text("Restaurar") }
+            },
+            dismissButton = { TextButton(onClick = { showRestoreConfirm = false }) { Text("Cancelar") } }
+        )
+    }
 
-        // Intentar persistir permisos (no imprescindible, pero ayuda)
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        }
-
-        coroutineScope.launch {
-            try {
-                isExporting = true
-                withContext(Dispatchers.IO) {
-                    writeCsvToUri(uri, periodTravels, stopsInPeriod)
-                }
-                ExportPreferences.setLastClosedKey(context, key)
-                snackbarHostState.showSnackbar("✅ Periodo cerrado: ${monthlyFileNameForKey(key)}")
-            } catch (e: Exception) {
-                snackbarHostState.showSnackbar("❌ Error al cerrar periodo: ${e.localizedMessage ?: "desconocido"}")
-            } finally {
-                isExporting = false
+    // ---- Helpers SAF (crear/sobrescribir documento dentro del árbol) ----
+    fun findChildDocIdByName(parentTreeUri: Uri, parentDocId: String, displayName: String): String? {
+        val resolver = context.contentResolver
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parentTreeUri, parentDocId)
+        resolver.query(
+            childrenUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val docId = c.getString(0)
+                val name = c.getString(1)
+                if (name == displayName) return docId
             }
         }
+        return null
     }
 
-    fun requestDailyIfMissing() {
-        dailyCreateLauncher.launch(dailyFileName())
+    fun ensureDir(parentTreeUri: Uri, parentDocId: String, dirName: String): Uri {
+        val resolver = context.contentResolver
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(parentTreeUri, parentDocId)
+        resolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            ),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val docId = c.getString(0)
+                val name = c.getString(1)
+                val mime = c.getString(2)
+                if (name == dirName && mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    return DocumentsContract.buildDocumentUriUsingTree(parentTreeUri, docId)
+                }
+            }
+        }
+
+        val newDirUri = DocumentsContract.createDocument(
+            resolver,
+            parentTreeUri,
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            dirName
+        ) ?: throw IllegalStateException("No se pudo crear carpeta $dirName")
+
+        return newDirUri
     }
 
-    fun requestMonthlyClose(key: String) {
-        pendingCloseKey = key
-        monthlyCreateLauncher.launch(monthlyFileNameForKey(key))
+    suspend fun writeCsvIntoDir(dirTreeUri: Uri, fileName: String, travels: List<TravelEntity>, stops: List<TravelStopEntity>) {
+        val resolver = context.contentResolver
+        val dirDocId = DocumentsContract.getDocumentId(dirTreeUri)
+
+        // delete if exists
+        val existingId = findChildDocIdByName(dirTreeUri, dirDocId, fileName)
+        if (existingId != null) {
+            val existingUri = DocumentsContract.buildDocumentUriUsingTree(dirTreeUri, existingId)
+            runCatching { DocumentsContract.deleteDocument(resolver, existingUri) }
+        }
+
+        val newFileUri = DocumentsContract.createDocument(resolver, dirTreeUri, "text/csv", fileName)
+            ?: throw IllegalStateException("No se pudo crear $fileName")
+
+        resolver.openOutputStream(newFileUri, "wt")?.use { out ->
+            AxisUnifiedCsvExporter.writeCsv(out, travels, stops)
+        } ?: throw IllegalStateException("No se pudo escribir $fileName")
     }
 
-    fun doSmartExport() {
-        if (isExporting) return
+    suspend fun writeBackupIntoBackupsDir(axisTreeUri: Uri) {
+        val today = todayKey()
+        val last = ExportPreferences.getLastBackupDate(context)
+        if (last == today) return
 
-        val dailyUri = ExportPreferences.getDailyFileUri(context)
-        if (dailyUri == null) {
-            // 1ª vez o se perdió: configurar diario
-            requestDailyIfMissing()
+        val snapshot = withContext(Dispatchers.IO) { viewModel.buildSnapshotForBackup() }
+        val json = BackupManager.snapshotToJson(snapshot)
+        val gz = BackupManager.writeSnapshotToGzipBytes(json)
+
+        val axisDocId = DocumentsContract.getTreeDocumentId(axisTreeUri)
+        val backupsDirUri = ensureDir(axisTreeUri, axisDocId, "backups")
+
+        BackupManager.writeBytesToDocument(
+            context = context,
+            parentDirUri = backupsDirUri,
+            displayName = BackupManager.backupFileName(today),
+            mimeType = "application/gzip",
+            bytes = gz
+        )
+
+        // Retención últimos 7 (por nombre)
+        pruneOldBackups(backupsDirUri, keep = 7)
+
+        ExportPreferences.setLastBackupDate(context, today)
+    }
+
+    fun pruneOldBackups(backupsDirUri: Uri, keep: Int) {
+        val resolver = context.contentResolver
+        val dirDocId = DocumentsContract.getDocumentId(backupsDirUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(backupsDirUri, dirDocId)
+
+        val entries = mutableListOf<Pair<String, String>>() // (displayName, docId)
+        resolver.query(
+            childrenUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null
+        )?.use { c ->
+            while (c.moveToNext()) {
+                val docId = c.getString(0)
+                val name = c.getString(1)
+                if (name.startsWith("AXIS_backup_") && name.endsWith(".json.gz")) {
+                    entries.add(name to docId)
+                }
+            }
+        }
+
+        // Orden lexicográfico por nombre: YYYY_MM_DD → orden cronológico natural
+        val sorted = entries.sortedByDescending { it.first }
+        val toDelete = if (sorted.size > keep) sorted.drop(keep) else emptyList()
+
+        toDelete.forEach { (_, docId) ->
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(backupsDirUri, docId)
+            runCatching { DocumentsContract.deleteDocument(resolver, docUri) }
+        }
+    }
+
+    fun doExportAll() {
+        val axis = axisFolderUri()
+        if (axis == null) {
+            pickAxisFolderLauncher.launch(null)
             return
         }
 
         coroutineScope.launch {
             try {
                 isExporting = true
-
-                // 1) Export diario fijo (siempre)
                 withContext(Dispatchers.IO) {
-                    writeCsvToUri(dailyUri, periodTravels, stopsInPeriod)
+                    // 1) CSV diario fijo (raíz AXIS)
+                    writeCsvIntoDir(axis, dailyCsvName(), periodTravels, stopsInPeriod)
+
+                    // 2) Cierre mensual automático (según toDate)
+                    val key = periodKey()
+                    val lastClosed = ExportPreferences.getLastClosedKey(context)
+                    if (lastClosed != key) {
+                        writeCsvIntoDir(axis, monthlyCsvName(key), periodTravels, stopsInPeriod)
+                        ExportPreferences.setLastClosedKey(context, key)
+                    }
+
+                    // 3) Backup diario (1 vez al día) a backups/
+                    writeBackupIntoBackupsDir(axis)
                 }
 
-                // 2) Cierre mensual automático (según Desde/Hasta)
-                val key = periodKey()
-                val lastClosed = ExportPreferences.getLastClosedKey(context)
-                if (lastClosed != key) {
-                    // Lanzamos automáticamente el guardar como para el histórico (una vez por periodo)
-                    requestMonthlyClose(key)
-                } else {
-                    snackbarHostState.showSnackbar("✅ Export diario actualizado (periodo ya cerrado)")
-                }
-
+                snackbarHostState.showSnackbar("✅ Export OK (CSV + backup si tocaba)")
             } catch (e: Exception) {
-                // Si falla el diario (ej: el usuario borró el archivo en Drive), reconfigurar automáticamente
-                ExportPreferences.clearDailyFileUri(context)
-                snackbarHostState.showSnackbar("⚠️ Diario inválido. Vuelve a configurar el destino.")
+                snackbarHostState.showSnackbar("❌ Error export: ${e.localizedMessage ?: "desconocido"}")
             } finally {
                 isExporting = false
             }
@@ -433,7 +544,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Calendar manager
+    // UI: Gestión calendario (📅)
     // =========================
     if (showCalendarManager) {
         CalendarManagementDialog(
@@ -453,7 +564,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Añadir festivo
+    // Diálogo añadir festivo (texto visible)
     if (showAddHoliday) {
         AlertDialog(
             onDismissRequest = { showAddHoliday = false },
@@ -490,7 +601,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Añadir vacaciones
+    // Diálogo añadir vacaciones (texto visible)
     if (showAddVacation) {
         AlertDialog(
             onDismissRequest = { showAddVacation = false },
@@ -549,7 +660,7 @@ fun ActivityHomeScreen(
         )
     }
 
-    // ===== Diálogo editar viaje =====
+    // Diálogo editar viaje
     if (showEditDialog && editingTravelId != null) {
         val original = allTravels.firstOrNull { it.id == editingTravelId }
 
@@ -719,11 +830,12 @@ fun ActivityHomeScreen(
             ) { DatePicker(state = toPickerState) }
         }
 
+        // Layout principal
         Row(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // IZQUIERDA KPIs + Export
+            // IZQUIERDA KPIs + Export + Restore
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -731,7 +843,10 @@ fun ActivityHomeScreen(
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
                 BlockTitle("Periodo de facturación")
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) {
@@ -742,14 +857,20 @@ fun ActivityHomeScreen(
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = {
-                                val (mStart, mEnd) = currentMonthRangeMillis(zone)
-                                coroutineScope.launch { BillingPeriodStore.savePeriod(context, mStart, mEnd) }
-                            }, modifier = Modifier.weight(1f)) { Text("Este mes") }
+                            Button(
+                                onClick = {
+                                    val (mStart, mEnd) = currentMonthRangeMillis(zone)
+                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, mStart, mEnd) }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Este mes") }
 
-                            Button(onClick = {
-                                coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) }
-                            }, modifier = Modifier.weight(1f)) { Text("Reset") }
+                            Button(
+                                onClick = {
+                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("Reset") }
                         }
                     }
                 }
@@ -769,36 +890,54 @@ fun ActivityHomeScreen(
                 KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo cerrados")
                 KpiLine("Δ Horas (objetivo - imputadas)", formatHours(deltaHoras), "positivo = faltan horas")
 
-                Spacer(modifier = Modifier.height(16.dp))
+                SectionDivider()
 
-                // ✅ EXPORT: 1 click. Si falta diario -> pide Guardar como. Si mes no cerrado -> abre Guardar como mensual automático.
+                BlockTitle("Anual + Tesorería")
+                KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 enero")
+                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos no facturados")
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Configurar carpeta si falta
+                val axis = axisFolderUri()
+                if (axis == null) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("⚠️ Carpeta AXIS no configurada", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                            Text("Pulsa abajo y elige en Drive tu carpeta AXIS.", color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+
                 Button(
-                    onClick = { doSmartExport() },
+                    onClick = { doExportAll() },
                     enabled = !isExporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     if (isExporting) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             CircularProgressIndicator(strokeWidth = 2.dp)
-                            Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
+                            Text("PROCESANDO…", fontWeight = FontWeight.Bold)
                         }
                     } else {
-                        Text("📤 EXPORTAR CSV A DRIVE", fontWeight = FontWeight.Bold)
+                        Text("📤 EXPORTAR (CSV + BACKUP)", fontWeight = FontWeight.Bold)
                     }
+                }
+
+                TextButton(onClick = { pickAxisFolderLauncher.launch(null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("⚙️ Configurar / Cambiar carpeta AXIS (Drive)")
                 }
 
                 TextButton(
                     onClick = {
-                        ExportPreferences.clearDailyFileUri(context)
-                        requestDailyIfMissing()
+                        // SAF abrir documento: seleccionas el backup .json.gz
+                        pickBackupFileLauncher.launch(arrayOf("application/gzip", "application/octet-stream", "*/*"))
                     },
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("⚙️ Cambiar destino del CSV diario (AXIS_export_actual.csv)")
-                }
+                ) { Text("🛟 Restaurar desde backup (.json.gz)") }
             }
 
-            // DERECHA: TIMELINE
+            // DERECHA: TIMELINE COMPLETO (sin recortes)
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -808,15 +947,27 @@ fun ActivityHomeScreen(
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                     items(daysInRange) { day ->
                         val isWeekend = day.isWeekend()
+
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
+
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
-                        DayHeader(day, dateFormatter, localeEs, isWeekend, isHoliday, isVacation)
+                        DayHeader(
+                            day = day,
+                            dateFormatter = dateFormatter,
+                            localeEs = localeEs,
+                            isWeekend = isWeekend,
+                            isHoliday = isHoliday,
+                            isVacation = isVacation
+                        )
 
                         if (holiday != null) {
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🎉 FESTIVO", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                                     val desc = holiday.description.trim()
@@ -824,7 +975,10 @@ fun ActivityHomeScreen(
                                 }
                             }
                         } else if (isVacation) {
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🏖️ VACACIONES", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
                                     val cleaned = vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
@@ -835,7 +989,10 @@ fun ActivityHomeScreen(
 
                         val stopCount = stopsCountByDay[day] ?: 0
                         if (stopCount > 0) {
-                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text("📍 $stopCount", fontWeight = FontWeight.Bold)
                                 }
@@ -903,7 +1060,99 @@ fun ActivityHomeScreen(
     }
 }
 
-/* ========================= Helpers ========================= */
+/* =========================
+   Helpers UI + Date + JSON
+   ========================= */
+
+private fun parseSnapshotJson(json: String): BackupSnapshot {
+    val root = JSONObject(json)
+    val createdAt = root.getLong("createdAtMillis")
+
+    val bpObj = root.opt("billingPeriod")
+    val billingPeriod = if (bpObj == null || bpObj == JSONObject.NULL) {
+        null
+    } else {
+        val p = bpObj as JSONObject
+        BillingPeriod(p.getLong("fromMillis"), p.getLong("toMillis"))
+    }
+
+    val holidaysArr = root.getJSONArray("holidays")
+    val holidays = buildList {
+        for (i in 0 until holidaysArr.length()) {
+            val o = holidaysArr.getJSONObject(i)
+            add(CalendarOverridesStore.Holiday(LocalDate.parse(o.getString("date")), o.optString("description", "")))
+        }
+    }
+
+    val vacationsArr = root.getJSONArray("vacations")
+    val vacations = buildList {
+        for (i in 0 until vacationsArr.length()) {
+            val o = vacationsArr.getJSONObject(i)
+            add(CalendarOverridesStore.Vacation(LocalDate.parse(o.getString("from")), LocalDate.parse(o.getString("to")), o.optString("description", "")))
+        }
+    }
+
+    val travelsArr = root.getJSONArray("travels")
+    val travels = buildList {
+        for (i in 0 until travelsArr.length()) {
+            val o = travelsArr.getJSONObject(i)
+            add(
+                TravelEntity(
+                    id = o.getString("id"),
+                    startTimestamp = o.getLong("startTimestamp"),
+                    endTimestamp = if (o.isNull("endTimestamp")) null else o.getLong("endTimestamp"),
+                    origin = o.getString("origin"),
+                    destination = o.getString("destination"),
+                    description = o.getString("description"),
+                    kmStart = o.getInt("kmStart"),
+                    kmEnd = if (o.isNull("kmEnd")) null else o.getInt("kmEnd"),
+                    hasDiet = o.getBoolean("hasDiet"),
+                    billingExpected = o.getDouble("billingExpected"),
+                    status = TravelStatus.valueOf(o.getString("status")),
+                    hoursDraft = if (o.isNull("hoursDraft")) null else o.getDouble("hoursDraft"),
+                    hoursCalculatedSnapshot = if (o.isNull("hoursCalculatedSnapshot")) null else o.getDouble("hoursCalculatedSnapshot"),
+                    hoursImputed = if (o.isNull("hoursImputed")) null else o.getDouble("hoursImputed"),
+                    hoursModified = o.getBoolean("hoursModified"),
+                    deltaHours = if (o.isNull("deltaHours")) null else o.getDouble("deltaHours"),
+                    impactEuroAlejandro = if (o.isNull("impactEuroAlejandro")) null else o.getDouble("impactEuroAlejandro"),
+                    snapCosteKmOperativo = if (o.isNull("snapCosteKmOperativo")) null else o.getDouble("snapCosteKmOperativo"),
+                    snapCosteDietaFija = if (o.isNull("snapCosteDietaFija")) null else o.getDouble("snapCosteDietaFija"),
+                    snapPorcBenefExigidoA = if (o.isNull("snapPorcBenefExigidoA")) null else o.getDouble("snapPorcBenefExigidoA"),
+                    snapCosteHoraAlejandro = if (o.isNull("snapCosteHoraAlejandro")) null else o.getDouble("snapCosteHoraAlejandro"),
+                    snapCosteHoraEmpresaX = if (o.isNull("snapCosteHoraEmpresaX")) null else o.getDouble("snapCosteHoraEmpresaX"),
+                    snapTarifaObjetivoY = if (o.isNull("snapTarifaObjetivoY")) null else o.getDouble("snapTarifaObjetivoY"),
+                    isInvoiced = o.getBoolean("isInvoiced"),
+                    endAddress = o.optString("endAddress", "")
+                )
+            )
+        }
+    }
+
+    val stopsArr = root.getJSONArray("stops")
+    val stops = buildList {
+        for (i in 0 until stopsArr.length()) {
+            val o = stopsArr.getJSONObject(i)
+            add(
+                TravelStopEntity(
+                    id = o.getString("id"),
+                    travelId = o.getString("travelId"),
+                    timestamp = o.getLong("timestamp"),
+                    place = o.getString("place"),
+                    kmOdometer = if (o.isNull("kmOdometer")) null else o.getInt("kmOdometer")
+                )
+            )
+        }
+    }
+
+    return BackupSnapshot(
+        createdAtMillis = createdAt,
+        billingPeriod = billingPeriod,
+        holidays = holidays,
+        vacations = vacations,
+        travels = travels,
+        stops = stops
+    )
+}
 
 @Composable
 private fun BlockTitle(text: String) {
@@ -1028,6 +1277,7 @@ private fun buildVacationDescriptionsByDate(
     periodTo: LocalDate
 ): Map<LocalDate, List<String>> {
     if (vacations.isEmpty()) return emptyMap()
+
     val map = mutableMapOf<LocalDate, MutableList<String>>()
 
     vacations.forEach { v ->
