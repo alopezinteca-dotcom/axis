@@ -1,4 +1,6 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.hashnode.content.Context
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export
+
+import android.content.Context
 import android.net.Uri
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -60,7 +62,7 @@ object AxisImportCoordinator {
 
         val resolver = context.contentResolver
 
-        // 1) Abrir stream y parsear filas
+        // 1) Abrir stream y parsear filas usando el Importer modular
         val parsed = resolver.openInputStream(csvUri)?.use { input ->
             AxisUnifiedCsvImporter.parse(input)
         } ?: throw IllegalStateException("No se pudo acceder al archivo CSV (SAF/Drive)")
@@ -84,20 +86,21 @@ object AxisImportCoordinator {
             }
         }
 
-        // 4) Persistencia según estrategia
+        // 4) Persistencia en base de datos
+        // NOTA: Se recomienda que estas llamadas en el Repository sean @Transaction
         when (strategy) {
             ImportStrategy.REPLACE_ALL -> {
-                // ✅ Mejor orden: primero paradas, luego viajes (FK + claridad)
+                // El orden de borrado es vital si hay restricciones de integridad
                 stopRepository.deleteAll()
                 travelRepository.deleteAll()
 
-                // ✅ Insertar en orden por FK: primero viajes, luego paradas
+                // Insertar Viajes primero, luego Paradas (FK)
                 travelRepository.upsertAll(travelEntities)
                 stopRepository.upsertAll(stopEntities)
             }
 
             ImportStrategy.MERGE -> {
-                // Insertar o actualizar sin borrar
+                // Upsert directo: Room actualizará por ID si ya existe
                 travelRepository.upsertAll(travelEntities)
                 stopRepository.upsertAll(stopEntities)
             }
@@ -111,19 +114,25 @@ object AxisImportCoordinator {
     }
 
     /**
-     * Convierte una fila de texto en una entidad de Viaje.
+     * Convierte una fila de texto procesada en una entidad de Viaje real.
      */
     private fun rowToTravelEntity(
         row: AxisUnifiedCsvImporter.TravelRow,
         zone: ZoneId
     ): TravelEntity? {
         val id = row.travelId.trim()
-        if (id.isBlank()) return null
+        if (id.isBlank()) {
+            return null
+        }
 
-        // Reconstrucción de timestamps (fecha + hora)
-        val date = runCatching { LocalDate.parse(row.travelDate.trim(), dateFmt) }.getOrNull() ?: return null
-        val startTime = runCatching { LocalTime.parse(row.travelTimeStart.trim(), timeFmt) }.getOrNull()
-            ?: LocalTime.MIDNIGHT
+        // Reconstrucción de timestamps (Fecha + Hora -> Epoch Millis)
+        val date = runCatching { 
+            LocalDate.parse(row.travelDate.trim(), dateFmt) 
+        }.getOrNull() ?: return null
+
+        val startTime = runCatching { 
+            LocalTime.parse(row.travelTimeStart.trim(), timeFmt) 
+        }.getOrNull() ?: LocalTime.MIDNIGHT
 
         val startTs = LocalDateTime.of(date, startTime)
             .atZone(zone)
@@ -132,21 +141,24 @@ object AxisImportCoordinator {
 
         val endTs = row.travelTimeEnd.trim().takeIf { it.isNotBlank() }?.let { tStr ->
             val endTime = runCatching { LocalTime.parse(tStr, timeFmt) }.getOrNull()
-            endTime?.let { LocalDateTime.of(date, it).atZone(zone).toInstant().toEpochMilli() }
+            endTime?.let { 
+                LocalDateTime.of(date, it).atZone(zone).toInstant().toEpochMilli() 
+            }
         }
 
-        // Campos numéricos y booleanos
+        // Parseo de campos numéricos
         val kmStart = row.kmStart.trim().toIntOrNull() ?: 0
         val kmEnd = row.kmEnd.trim().toIntOrNull()
         val hasDiet = row.hasDiet.trim() == "1"
         val billingExpected = parseDoubleOrZero(row.billingExpected)
         val isInvoiced = row.isInvoiced.trim() == "1"
 
-        // Estado del viaje
-        val status = runCatching { TravelStatus.valueOf(row.status.trim()) }.getOrNull()
-            ?: TravelStatus.IN_PROGRESS
+        // Estado del viaje (Enum)
+        val status = runCatching { 
+            TravelStatus.valueOf(row.status.trim()) 
+        }.getOrNull() ?: TravelStatus.IN_PROGRESS
 
-        // Horas y derivados
+        // Horas y lógica de modificación
         val hoursDraft = parseNullableDouble(row.hoursDraft)
         val hoursCalcSnapshot = parseNullableDouble(row.hoursCalcSnapshot)
         val hoursImputed = parseNullableDouble(row.hoursImputed)
@@ -175,7 +187,7 @@ object AxisImportCoordinator {
             hoursImputed = hoursImputed,
             hoursModified = hoursModified,
             deltaHours = deltaHours,
-            impactEuroAlejandro = null,
+            impactEuroAlejandro = null, // No se persiste en el CSV, se calcula al vuelo
             snapCosteKmOperativo = null,
             snapCosteDietaFija = null,
             snapPorcBenefExigidoA = null,
@@ -188,12 +200,14 @@ object AxisImportCoordinator {
     }
 
     /**
-     * Convierte una fila de texto en una entidad de Parada.
+     * Convierte una fila de texto procesada en una entidad de Parada real.
      */
     private fun rowToStopEntity(row: AxisUnifiedCsvImporter.StopRow): TravelStopEntity? {
         val stopId = row.stopId.trim()
         val travelId = row.travelId.trim()
-        if (stopId.isBlank() || travelId.isBlank()) return null
+        if (stopId.isBlank() || travelId.isBlank()) {
+            return null
+        }
 
         val ts = row.stopTimestamp.trim().toLongOrNull() ?: return null
         val km = row.stopKmOdometer.trim().toIntOrNull()
