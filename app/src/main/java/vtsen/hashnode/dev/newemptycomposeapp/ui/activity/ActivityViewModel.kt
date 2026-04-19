@@ -26,6 +26,7 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopRepository
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisBackupCoordinator
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
@@ -52,8 +53,8 @@ class ActivityViewModel(
     // =========================
 
     /**
-     * Si tienes implementado periodFlowResolved/ensureInitialized en BillingPeriodStore,
-     * úsalo; si no, cambia por periodFlowRaw.
+     * Si tienes implementado periodFlowResolved/ensureInitialized en BillingPeriodStore, úsalo.
+     * Si no lo tienes, cambia por periodFlowRaw(context) según tu store.
      */
     val billingPeriod: StateFlow<BillingPeriod> =
         BillingPeriodStore.periodFlowResolved(appContext, zone)
@@ -109,6 +110,14 @@ class ActivityViewModel(
         }
     }
 
+    /**
+     * Compat con tu UI: antes setStopsRange mutaba un range interno.
+     * Ahora: escribe periodo en DataStore (source of truth).
+     */
+    fun setStopsRange(fromMillis: Long, toMillis: Long) {
+        setBillingPeriodMillis(fromMillis, toMillis)
+    }
+
     // =========================
     // 1) Travels flows
     // =========================
@@ -135,17 +144,20 @@ class ActivityViewModel(
         )
 
     // =========================
-    // 2) Stops del viaje en curso
+    // 2) Stops del viaje en curso  ✅ (se mantiene)
     // =========================
 
     val stopsForCurrentTravel: StateFlow<List<TravelStopEntity>> =
-        currentTravel.flatMapLatest { t ->
-            if (t == null) flowOf(emptyList()) else stopRepository.stopsForTravel(t.id)
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
+        currentTravel
+            .flatMapLatest { t ->
+                if (t == null) flowOf(emptyList()) else stopRepository.stopsForTravel(t.id)
+            }
+            .distinctUntilChanged()
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5_000),
+                initialValue = emptyList()
+            )
 
     // =========================
     // 3) Stops del periodo (timeline)
@@ -166,14 +178,6 @@ class ActivityViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList()
             )
-
-    /**
-     * Compatibilidad con tu UI: antes setStopsRange mutaba un range interno.
-     * Ahora: escribe periodo en DataStore (source of truth).
-     */
-    fun setStopsRange(fromMillis: Long, toMillis: Long) {
-        setBillingPeriodMillis(fromMillis, toMillis)
-    }
 
     // =========================
     // 4) PARADAS (solo EN CURSO)
@@ -274,9 +278,6 @@ class ActivityViewModel(
         viewModelScope.launch { repository.setInvoiced(travelId, isInvoiced) }
     }
 
-    /**
-     * ✅ Solo una versión (evita overload duplicado)
-     */
     fun updateTravel(updated: TravelEntity) {
         viewModelScope.launch { repository.insertTravel(updated) }
     }
@@ -342,22 +343,23 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 6) BACKUP / RESTORE (Opción A: TODO)
+    // 6) BACKUP / RESTORE (se mantiene)
     // =========================
 
+    /**
+     * IMPORTANTE:
+     * Antes usabas stopsInPeriod (solo rango). Ahora que tenemos allStopsOnce(),
+     * hacemos snapshot completo de stops para que la restauración sea realmente "total".
+     */
     suspend fun buildSnapshotForBackup(): BackupSnapshot {
-        // Periodo
-        val bp = BillingPeriodStore.periodFlowRaw(appContext).first()
+        val bp = runCatching { BillingPeriodStore.periodFlowRaw(appContext).first() }
+            .getOrElse { billingPeriod.value }
 
-        // Calendario
         val holidays = CalendarOverridesStore.holidaysFlow(appContext).first()
         val vacations = CalendarOverridesStore.vacationsFlow(appContext).first()
 
-        // Datos
         val travels = allTravels.value
-        val stops = stopsInPeriod.value
-        // Si quieres TODO stops históricos (no solo rango), habría que exponer un flow de todos los stops.
-        // De momento mantiene coherencia con tu rango de exportación.
+        val stops = stopRepository.allStopsOnce() // ✅ snapshot completo
 
         return BackupSnapshot(
             createdAtMillis = System.currentTimeMillis(),
@@ -374,11 +376,11 @@ class ActivityViewModel(
         repository.deleteAll()
         stopRepository.deleteAll()
 
-        // 2) Restore datos
+        // 2) Restore datos (Travel primero, Stops después por FK)
         repository.upsertAll(snapshot.travels)
         stopRepository.upsertAll(snapshot.stops)
 
-        // 3) Restore calendario (primero borrar lo actual)
+        // 3) Restore calendario (borrar lo actual)
         val existingH = CalendarOverridesStore.holidaysFlow(appContext).first()
         existingH.forEach { h ->
             CalendarOverridesStore.removeHolidayRaw(appContext, CalendarOverridesStore.toRawHoliday(h))
@@ -402,7 +404,46 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 7) Export flags (si los usas en UI)
+    // 7) Export a Drive: Maestro + Backup semanal (NUEVO)
+    // =========================
+
+    /**
+     * Export recomendado:
+     * - Siempre: AXIS_Master_Database.csv (TODOS los viajes + TODAS las paradas)
+     * - Cada 7 días: AXIS_Backup_yyyy_MM_dd.csv (según ExportPreferences.last_backup_timestamp)
+     *
+     * Requiere:
+     * - stopRepository.allStopsOnce()
+     * - AxisBackupCoordinator (usa AxisFileManager Drive-safe)
+     */
+    fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
+        if (_isExporting.value) return
+
+        viewModelScope.launch {
+            _isExporting.value = true
+            _exportError.value = null
+            try {
+                withContext(Dispatchers.IO) {
+                    val travelsSnapshot = allTravels.value
+                    val stopsSnapshot = stopRepository.allStopsOnce()
+
+                    AxisBackupCoordinator.exportMasterAndMaybeBackup(
+                        context = appContext,
+                        folderUri = folderUri,
+                        allTravels = travelsSnapshot,
+                        allStops = stopsSnapshot
+                    )
+                }
+            } catch (e: Exception) {
+                _exportError.value = e.localizedMessage ?: "Error desconocido"
+            } finally {
+                _isExporting.value = false
+            }
+        }
+    }
+
+    // =========================
+    // 8) Export flags (UI)
     // =========================
     private val _isExporting = MutableStateFlow(false)
     val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
