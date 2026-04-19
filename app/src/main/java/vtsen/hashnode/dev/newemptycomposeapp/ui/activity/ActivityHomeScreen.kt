@@ -1,5 +1,8 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vts android.app.Activity
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
+
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
