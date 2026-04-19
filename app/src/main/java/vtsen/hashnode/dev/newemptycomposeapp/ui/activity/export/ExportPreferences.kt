@@ -1,12 +1,62 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.hashnode.dev.newemptycomposeapp context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export
+
+import android.content.Context
+import android.net.Uri
+
+/**
+ * ExportPreferences
+ * * Gestiona la persistencia de las rutas (URIs) de exportación y metadatos de backup.
+ * Prioriza el uso de MASTER_FILE_URI para garantizar compatibilidad con Drive en Samsung.
+ */
+object ExportPreferences {
+
+    private const val PREFS = "axis_export_prefs"
+
+    // ✅ ESTRATEGIA PRINCIPAL: URI del ARCHIVO MAESTRO (CSV individual vinculado a Excel)
+    private const val KEY_MASTER_FILE_URI = "export_master_file_uri"
+
+    // =========================
+    // Claves de Compatibilidad
+    // =========================
+    // Carpeta en Drive (treeUri)
+    private const val KEY_FOLDER_URI = "export_folder_uri"
+    // URI de archivo diario (si aplica)
+    private const val KEY_DAILY_FILE_URI = "export_daily_file_uri"
+    // Cierre mensual (Key de control)
+    private const val KEY_LAST_CLOSED_KEY = "export_last_closed_key"
+    // Fecha del último backup exitoso (yyyy_MM_dd)
+    private const val KEY_LAST_BACKUP_DATE = "export_last_backup_date"
+    // Timestamp del último backup (millis)
+    private const val KEY_LAST_BACKUP_TIMESTAMP = "last_backup_timestamp"
+
+    // ----------------------------------------------------------------------
+    // ✅ GESTIÓN DEL ARCHIVO MAESTRO (Estrategia por Archivo Individual)
+    // ----------------------------------------------------------------------
+
+    fun saveMasterFileUri(context: Context, uri: Uri) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_MASTER_FILE_URI, uri.toString())
+            .apply()
+    }
+
+    fun getMasterFileUri(context: Context): Uri? {
+        val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(KEY_MASTER_FILE_URI, null)
+        return s?.let { Uri.parse(it) }
+    }
+
+    fun clearMasterFileUri(context: Context) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
             .remove(KEY_MASTER_FILE_URI)
             .apply()
     }
 
     // ----------------------------------------------------------------------
-    // Compat: Folder URI
+    // GESTIÓN DE CARPETA (Estrategia por Carpeta - Compatibilidad)
     // ----------------------------------------------------------------------
+
     fun saveFolderUri(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -17,7 +67,7 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
     fun getFolderUri(context: Context): Uri? {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_FOLDER_URI, null)
-        return s?.let(Uri::parse)
+        return s?.let { Uri.parse(it) }
     }
 
     fun clearFolderUri(context: Context) {
@@ -28,8 +78,9 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
     }
 
     // ----------------------------------------------------------------------
-    // Compat: Daily file URI
+    // GESTIÓN DE ARCHIVO DIARIO
     // ----------------------------------------------------------------------
+
     fun saveDailyFileUri(context: Context, uri: Uri) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -40,7 +91,7 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
     fun getDailyFileUri(context: Context): Uri? {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_DAILY_FILE_URI, null)
-        return s?.let(Uri::parse)
+        return s?.let { Uri.parse(it) }
     }
 
     fun clearDailyFileUri(context: Context) {
@@ -51,8 +102,12 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
     }
 
     // ----------------------------------------------------------------------
-    // Compat: Monthly close key
+    // METADATOS DE CONTROL
     // ----------------------------------------------------------------------
+
+    /**
+     * Guarda la clave del último periodo cerrado (ej. "2026-04").
+     */
     fun setLastClosedKey(context: Context, key: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -65,9 +120,9 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
             .getString(KEY_LAST_CLOSED_KEY, null)
     }
 
-    // ----------------------------------------------------------------------
-    // Compat: Backup date yyyy_MM_dd
-    // ----------------------------------------------------------------------
+    /**
+     * Guarda la fecha del último backup (formato legible yyyy_MM_dd).
+     */
     fun setLastBackupDate(context: Context, yyyyMmDd: String) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -80,9 +135,9 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
             .getString(KEY_LAST_BACKUP_DATE, null)
     }
 
-    // ----------------------------------------------------------------------
-    // Backup timestamp (millis)
-    // ----------------------------------------------------------------------
+    /**
+     * Guarda el timestamp exacto del último backup.
+     */
     fun setLastBackupTimestamp(context: Context, timestampMillis: Long) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
@@ -95,50 +150,3 @@ package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.ha
             .getLong(KEY_LAST_BACKUP_TIMESTAMP, 0L)
     }
 }
-
-import android.content.Context
-import android.net.Uri
-
-object ExportPreferences {
-    private const val PREFS = "axis_export_prefs"
-
-    // =========================
-    // NUEVO (recomendado): URI del ARCHIVO MAESTRO (CSV fijo)
-    // =========================
-    private const val KEY_MASTER_FILE_URI = "export_master_file_uri"
-
-    // =========================
-    // Compatibilidad (lo que ya tenías)
-    // =========================
-    // Carpeta en Drive (treeUri) — puede no funcionar en tu Tab para Drive, pero lo dejamos por compat
-    private const val KEY_FOLDER_URI = "export_folder_uri"
-
-    // (Compat) URI de archivo diario si alguna vez lo usaste
-    private const val KEY_DAILY_FILE_URI = "export_daily_file_uri"
-
-    // (Compat) cierre mensual
-    private const val KEY_LAST_CLOSED_KEY = "export_last_closed_key"
-
-    // (Compat) backup por fecha yyyy_MM_dd
-    private const val KEY_LAST_BACKUP_DATE = "export_last_backup_date"
-
-    // Backup por timestamp (millis)
-    private const val KEY_LAST_BACKUP_TIMESTAMP = "last_backup_timestamp"
-
-    // ----------------------------------------------------------------------
-    // ✅ MASTER FILE URI (lo que usaremos ahora)
-    // ----------------------------------------------------------------------
-    fun saveMasterFileUri(context: Context, uri: Uri) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_MASTER_FILE_URI, uri.toString())
-            .apply()
-    }
-
-    fun getMasterFileUri(context: Context): Uri? {
-        val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_MASTER_FILE_URI, null)
-        return s?.let(Uri::parse)
-    }
-
-    fun clearMasterFileUri(context: Context) {
