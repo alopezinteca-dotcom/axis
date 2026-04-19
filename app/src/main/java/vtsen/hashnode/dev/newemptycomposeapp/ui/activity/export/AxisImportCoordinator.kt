@@ -1,6 +1,9 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export
 
-import androidimport android.content.Context
+import android.content.Context
+import android.net.Uri
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -67,7 +70,7 @@ object AxisImportCoordinator {
 
         val travelIds = travelEntities.map { it.id }.toHashSet()
 
-        // 2) Mapear stops (solo si travel existe)
+        // 2) Mapear stops (solo si el viaje existe en este set)
         var skipped = 0
         val stopEntities = parsed.stops.mapNotNull { row ->
             if (!travelIds.contains(row.travelId)) {
@@ -81,7 +84,6 @@ object AxisImportCoordinator {
         // 3) Persistir en Room (orden por FK: travels primero)
         when (strategy) {
             ImportStrategy.REPLACE_ALL -> {
-                // Si estos métodos no existen en tu repo, dímelo y te paso el repo/dao completo.
                 travelRepository.deleteAll()
                 stopRepository.deleteAll()
 
@@ -138,7 +140,12 @@ object AxisImportCoordinator {
         val hoursImputed = parseNullableDouble(row.hoursImputed)
 
         // Derivados si vienen horas
-        val deltaHours = if (hoursImputed != null && hoursCalcSnapshot != null) hoursImputed - hoursCalcSnapshot else null
+        val deltaHours = if (hoursImputed != null && hoursCalcSnapshot != null) {
+            hoursImputed - hoursCalcSnapshot
+        } else {
+            null
+        }
+        
         val hoursModified = deltaHours?.let { abs(it) > 0.01 } ?: false
 
         val isInvoiced = row.isInvoiced.trim() == "1"
@@ -160,7 +167,7 @@ object AxisImportCoordinator {
             hoursImputed = hoursImputed,
             hoursModified = hoursModified,
             deltaHours = deltaHours,
-            impactEuroAlejandro = null, // no viene en CSV
+            impactEuroAlejandro = null, // No se exporta en CSV
             snapCosteKmOperativo = null,
             snapCosteDietaFija = null,
             snapPorcBenefExigidoA = null,
@@ -168,7 +175,7 @@ object AxisImportCoordinator {
             snapCosteHoraEmpresaX = null,
             snapTarifaObjetivoY = null,
             isInvoiced = isInvoiced,
-            endAddress = "" // no viene en CSV
+            endAddress = "" // No se exporta en CSV
         )
     }
 
@@ -202,5 +209,3 @@ object AxisImportCoordinator {
         return x.replace(',', '.').toDoubleOrNull()
     }
 }
-import android.net.Uri
-import java.time.LocalDate
