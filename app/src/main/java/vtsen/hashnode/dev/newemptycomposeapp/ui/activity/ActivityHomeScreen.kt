@@ -1,11 +1,7 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
-
-import android.app.Activity
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vts android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -109,27 +105,27 @@ fun ActivityHomeScreen(
     val fromDate = periodDates.first
     val toDate = periodDates.second
 
-    // Estados de Exportación
+    // Export state
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle(initialValue = false)
     val exportError by viewModel.exportError.collectAsStateWithLifecycle(initialValue = null)
 
-    // Estados de Importación
+    // Import state
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle(initialValue = false)
     val importError by viewModel.importError.collectAsStateWithLifecycle(initialValue = null)
     val lastImportResult by viewModel.lastImportResult.collectAsStateWithLifecycle(initialValue = null)
 
     // =========================
-    // Efectos de Feedback (Snackbars)
+    // Feedback Snackbars
     // =========================
     LaunchedEffect(exportError) {
-        exportError?.let { 
+        exportError?.let {
             snackbarHostState.showSnackbar("❌ Export: $it")
             viewModel.clearExportError()
         }
     }
 
     LaunchedEffect(importError) {
-        importError?.let { 
+        importError?.let {
             snackbarHostState.showSnackbar("❌ Import: $it")
             viewModel.clearImportError()
         }
@@ -170,7 +166,7 @@ fun ActivityHomeScreen(
     val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
         derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
     }
-    
+
     val holidayByDateInPeriod by remember(holidaysInPeriod) {
         derivedStateOf { holidaysInPeriod.associateBy { it.date } }
     }
@@ -178,11 +174,11 @@ fun ActivityHomeScreen(
     val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { allVacations.filter { v -> !(v.to.isBefore(fromDate) || v.from.isAfter(toDate)) } }
     }
-    
+
     val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
         derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
     }
-    
+
     val vacationDescsByDateInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
         derivedStateOf { buildVacationDescriptionsByDate(vacationsInPeriod, fromDate, toDate) }
     }
@@ -193,11 +189,9 @@ fun ActivityHomeScreen(
     val fromMillis = remember(fromDate, zone) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
     val toMillis = remember(toDate, zone) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
 
-    // Sincronizar paradas del periodo con el ViewModel
+    // Sincronizar paradas del periodo con el ViewModel (compat)
     LaunchedEffect(fromMillis, toMillis) {
-        if (fromMillis > 0L && toMillis > 0L) {
-            viewModel.setStopsRange(fromMillis, toMillis)
-        }
+        if (fromMillis > 0L && toMillis > 0L) viewModel.setStopsRange(fromMillis, toMillis)
     }
 
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
@@ -216,19 +210,19 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Cálculos de KPIs (Métricas)
+    // KPIs
     // =========================
     val totalEstimadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.sumOf { it.billingExpected } }
     }
-    
+
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { it.hoursImputed ?: 0.0 }
         }
     }
-    
+
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
@@ -243,7 +237,7 @@ fun ActivityHomeScreen(
                 countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
         }
     }
-    
+
     val diasLaborables = diasLaborablesReales.coerceAtLeast(0)
     val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
@@ -252,26 +246,27 @@ fun ActivityHomeScreen(
     val yearStartMillis = remember {
         BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
     }
-    
-    val nowEndMillis = remember {
-        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
-    }
-    
+    val nowEndMillis = remember { BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone) }
     val travelsYear by remember(allTravels, yearStartMillis, nowEndMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in yearStartMillis..nowEndMillis } }
     }
-    
     val totalAnualEstimado by remember(travelsYear) { derivedStateOf { travelsYear.sumOf { it.billingExpected } } }
-    
     val pendienteFacturar by remember(allTravels) {
         derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
 
     // =========================
-    // Diálogos de Pickers (Material 3)
+    // Date pickers (Desde / Hasta)
     // =========================
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
+
+    val fromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+    )
+    val toPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+    )
 
     if (showFromPicker) {
         DatePickerDialog(
@@ -310,10 +305,10 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Lanzadores SAF (Drive)
+    // SAF (Drive) Launchers
     // =========================
-    
-    // Lanzador para seleccionar CARPETA (Export)
+
+    // Export folder picker (tree)
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -327,26 +322,7 @@ fun ActivityHomeScreen(
         ExportPreferences.saveFolderUri(context, uri)
         viewModel.exportMasterAndMaybeBackupToDrive(uri)
 
-        coroutineScope.launch {
-            snackbarHostState.showSnackbar("✅ Carpeta seleccionada. Exportando…")
-        }
-    }
-
-    // Lanzador para seleccionar ARCHIVO CSV (Import)
-    val importCsvLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        if (uri == null) return@rememberLauncherForActivityResult
-
-        runCatching {
-            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
-        viewModel.importFromDriveCsv(uri, AxisImportCoordinator.ImportStrategy.REPLACE_ALL)
-
-        coroutineScope.launch {
-            snackbarHostState.showSnackbar("⏳ Importando CSV…")
-        }
+        coroutineScope.launch { snackbarHostState.showSnackbar("✅ Carpeta seleccionada. Exportando…") }
     }
 
     fun launchFolderPickerSaf() {
@@ -354,6 +330,7 @@ fun ActivityHomeScreen(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
+        // Ayuda a que aparezca Drive en algunos dispositivos
         try { intent.setPackage("com.android.documentsui") } catch (_: Exception) {}
 
         try {
@@ -367,12 +344,57 @@ fun ActivityHomeScreen(
         }
     }
 
+    // Import file picker (CSV)
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var showImportConfirm by remember { mutableStateOf(false) }
+
+    val importCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        // Intentar persistir permiso lectura (puede fallar según proveedor)
+        runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+
+        pendingImportUri = uri
+        showImportConfirm = true
+    }
+
     fun launchImportCsvPicker() {
         importCsvLauncher.launch(arrayOf("text/csv", "text/*", "application/octet-stream"))
     }
 
+    if (showImportConfirm) {
+        AlertDialog(
+            onDismissRequest = { showImportConfirm = false },
+            title = { Text("Importar CSV", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "⚠️ Esta acción REEMPLAZA TODO: se borrarán los datos locales (Room) y se restaurarán desde el CSV seleccionado.\n\n¿Continuar?"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val uri = pendingImportUri
+                    showImportConfirm = false
+                    pendingImportUri = null
+                    if (uri != null) {
+                        viewModel.importFromDriveCsv(uri, AxisImportCoordinator.ImportStrategy.REPLACE_ALL)
+                        coroutineScope.launch { snackbarHostState.showSnackbar("⏳ Importando CSV…") }
+                    }
+                }) { Text("Importar") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportConfirm = false
+                    pendingImportUri = null
+                }) { Text("Cancelar") }
+            }
+        )
+    }
+
     // =========================
-    // Estados de Diálogos de Edición/Borrado
+    // Edit/Delete dialogs state
     // =========================
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var travelToDeleteId by remember { mutableStateOf<String?>(null) }
@@ -406,105 +428,6 @@ fun ActivityHomeScreen(
         showEditDialog = true
     }
 
-    // =========================
-    // Diálogos de Calendario
-    // =========================
-    if (showCalendarManager) {
-        CalendarManagementDialog(
-            holidays = allHolidays,
-            vacations = allVacations,
-            onAddHoliday = { showAddHoliday = true },
-            onAddVacation = { showAddVacation = true },
-            onDeleteHoliday = { h ->
-                val raw = CalendarOverridesStore.toRawHoliday(h)
-                coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
-            },
-            onDeleteVacation = { v ->
-                val raw = CalendarOverridesStore.toRawVacation(v)
-                coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
-            },
-            onDismiss = { showCalendarManager = false }
-        )
-    }
-
-    if (showAddHoliday) {
-        AlertDialog(
-            onDismissRequest = { showAddHoliday = false },
-            title = { Text("Añadir festivo", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = holidayDesc,
-                        onValueChange = { holidayDesc = it },
-                        label = { Text("Descripción (festivo)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    DatePicker(state = holidayPickerState)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val picked = holidayPickerState.selectedDateMillis
-                    if (picked != null) {
-                        val d = BillingPeriodStore.millisToLocalDateOrToday(picked, zone)
-                        coroutineScope.launch {
-                            CalendarOverridesStore.addHoliday(context, d, holidayDesc)
-                            holidayDesc = ""
-                            snackbarHostState.showSnackbar("✅ Festivo añadido")
-                        }
-                    }
-                    showAddHoliday = false
-                }) { Text("Guardar") }
-            },
-            dismissButton = { TextButton(onClick = { showAddHoliday = false }) { Text("Cancelar") } }
-        )
-    }
-
-    if (showAddVacation) {
-        AlertDialog(
-            onDismissRequest = { showAddVacation = false },
-            title = { Text("Añadir vacaciones", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedTextField(
-                        value = vacationDesc,
-                        onValueChange = { vacationDesc = it },
-                        label = { Text("Descripción (vacaciones)") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text("Desde", fontWeight = FontWeight.SemiBold)
-                    DatePicker(state = vacFromPickerState)
-                    Text("Hasta", fontWeight = FontWeight.SemiBold)
-                    DatePicker(state = vacToPickerState)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val aMillis = vacFromPickerState.selectedDateMillis
-                    val bMillis = vacToPickerState.selectedDateMillis
-                    if (aMillis != null && bMillis != null) {
-                        val a = BillingPeriodStore.millisToLocalDateOrToday(aMillis, zone)
-                        val b = BillingPeriodStore.millisToLocalDateOrToday(bMillis, zone)
-                        coroutineScope.launch {
-                            CalendarOverridesStore.addVacation(context, a, b, vacationDesc)
-                            vacationDesc = ""
-                            snackbarHostState.showSnackbar("✅ Vacaciones añadidas")
-                        }
-                    }
-                    showAddVacation = false
-                }) { Text("Guardar") }
-            },
-            dismissButton = { TextButton(onClick = { showAddVacation = false }) { Text("Cancelar") } }
-        )
-    }
-
-    // Diálogos de Confirmación y Edición de Viaje
     if (showDeleteConfirm && travelToDeleteId != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -601,6 +524,12 @@ fun ActivityHomeScreen(
                     val imputed = editHoursImputed.replace(',', '.').toDoubleOrNull()
                     if (editHoursImputed.isNotBlank() && imputed == null) { editWarning = "Horas imputadas inválidas."; return@TextButton }
 
+                    val hoursCalc = base.hoursCalculatedSnapshot
+                    val delta = if (imputed != null && hoursCalc != null) (imputed - hoursCalc) else base.deltaHours
+                    val modified = if (delta != null) abs(delta) > 0.01 else base.hoursModified
+                    val costeHora = base.snapCosteHoraAlejandro ?: 26.0
+                    val impact = if (delta != null) delta * costeHora else base.impactEuroAlejandro
+
                     val updated = base.copy(
                         origin = editOrigin.trim(),
                         destination = editDestination.trim(),
@@ -610,6 +539,9 @@ fun ActivityHomeScreen(
                         kmStart = kmStart,
                         kmEnd = if (editKmEnd.isBlank()) base.kmEnd else kmEnd,
                         hoursImputed = if (base.status == TravelStatus.CLOSED) imputed else base.hoursImputed,
+                        deltaHours = delta,
+                        hoursModified = modified,
+                        impactEuroAlejandro = impact,
                         isInvoiced = editIsInvoiced
                     )
 
@@ -623,7 +555,105 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Estructura Scaffold Principal
+    // Calendar dialogs
+    // =========================
+    if (showCalendarManager) {
+        CalendarManagementDialog(
+            holidays = allHolidays,
+            vacations = allVacations,
+            onAddHoliday = { showAddHoliday = true },
+            onAddVacation = { showAddVacation = true },
+            onDeleteHoliday = { h ->
+                val raw = CalendarOverridesStore.toRawHoliday(h)
+                coroutineScope.launch { CalendarOverridesStore.removeHolidayRaw(context, raw) }
+            },
+            onDeleteVacation = { v ->
+                val raw = CalendarOverridesStore.toRawVacation(v)
+                coroutineScope.launch { CalendarOverridesStore.removeVacationRaw(context, raw) }
+            },
+            onDismiss = { showCalendarManager = false }
+        )
+    }
+
+    if (showAddHoliday) {
+        AlertDialog(
+            onDismissRequest = { showAddHoliday = false },
+            title = { Text("Añadir festivo", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = holidayDesc,
+                        onValueChange = { holidayDesc = it },
+                        label = { Text("Descripción (festivo)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    DatePicker(state = holidayPickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val picked = holidayPickerState.selectedDateMillis
+                    if (picked != null) {
+                        val d = BillingPeriodStore.millisToLocalDateOrToday(picked, zone)
+                        coroutineScope.launch {
+                            CalendarOverridesStore.addHoliday(context, d, holidayDesc)
+                            holidayDesc = ""
+                            snackbarHostState.showSnackbar("✅ Festivo añadido")
+                        }
+                    }
+                    showAddHoliday = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = { TextButton(onClick = { showAddHoliday = false }) { Text("Cancelar") } }
+        )
+    }
+
+    if (showAddVacation) {
+        AlertDialog(
+            onDismissRequest = { showAddVacation = false },
+            title = { Text("Añadir vacaciones", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedTextField(
+                        value = vacationDesc,
+                        onValueChange = { vacationDesc = it },
+                        label = { Text("Descripción (vacaciones)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Desde", fontWeight = FontWeight.SemiBold)
+                    DatePicker(state = vacFromPickerState)
+                    Text("Hasta", fontWeight = FontWeight.SemiBold)
+                    DatePicker(state = vacToPickerState)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val aMillis = vacFromPickerState.selectedDateMillis
+                    val bMillis = vacToPickerState.selectedDateMillis
+                    if (aMillis != null && bMillis != null) {
+                        val a = BillingPeriodStore.millisToLocalDateOrToday(aMillis, zone)
+                        val b = BillingPeriodStore.millisToLocalDateOrToday(bMillis, zone)
+                        coroutineScope.launch {
+                            CalendarOverridesStore.addVacation(context, a, b, vacationDesc)
+                            vacationDesc = ""
+                            snackbarHostState.showSnackbar("✅ Vacaciones añadidas")
+                        }
+                    }
+                    showAddVacation = false
+                }) { Text("Guardar") }
+            },
+            dismissButton = { TextButton(onClick = { showAddVacation = false }) { Text("Cancelar") } }
+        )
+    }
+
+    // =========================
+    // Scaffold principal
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -645,12 +675,11 @@ fun ActivityHomeScreen(
             ) { Text("+", style = MaterialTheme.typography.titleLarge) }
         }
     ) { padding ->
-
         Row(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // COLUMNA IZQUIERDA: KPIs y Acciones de Archivo
+            // IZQ: KPIs + Export/Import
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -694,11 +723,12 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // BOTÓN EXPORTAR
+                // Export
                 Button(
                     onClick = {
                         val folder = ExportPreferences.getFolderUri(context)
-                        if (folder == null) launchFolderPickerSaf() else viewModel.exportMasterAndMaybeBackupToDrive(folder)
+                        if (folder == null) launchFolderPickerSaf()
+                        else viewModel.exportMasterAndMaybeBackupToDrive(folder)
                     },
                     enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -719,7 +749,7 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // BOTÓN IMPORTAR
+                // Import
                 Button(
                     onClick = { launchImportCsvPicker() },
                     enabled = !isExporting && !isImporting,
@@ -736,13 +766,13 @@ fun ActivityHomeScreen(
                 }
 
                 Text(
-                    "⚠️ Importar (REEMPLAZA TODO): borra BD local y restaura desde el CSV.",
+                    "⚠️ Importar reemplaza TODO tu Room local.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
-            // COLUMNA DERECHA: Timeline del periodo
+            // DER: Timeline diario
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -751,16 +781,16 @@ fun ActivityHomeScreen(
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
                     items(daysInRange, key = { it.toEpochDay() }) { day ->
-
                         val isWeekend = day.isWeekend()
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
+
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
                         DayHeader(day, dateFormatter, localeEs, isWeekend, isHoliday, isVacation)
 
-                        if (isHoliday && holiday != null) {
+                        if (holiday != null) {
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🎉 FESTIVO", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
@@ -772,8 +802,9 @@ fun ActivityHomeScreen(
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🏖️ VACACIONES", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                    val cleaned = vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-                                    cleaned.forEach { Text(it, color = MaterialTheme.colorScheme.onTertiaryContainer) }
+                                    vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct().forEach {
+                                        Text(it, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                    }
                                 }
                             }
                         }
@@ -782,7 +813,7 @@ fun ActivityHomeScreen(
                         if (stopCount > 0) {
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("📍 $stopCount paradas", fontWeight = FontWeight.Bold)
+                                    Text("📍 $stopCount", fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -825,6 +856,7 @@ fun ActivityHomeScreen(
                                 )
                             }
                         }
+
                         Spacer(Modifier.height(6.dp))
                     }
                 }
@@ -834,7 +866,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   Componentes de Apoyo (Helpers UI)
+   Helpers UI + Date
    ========================= */
 
 @Composable
@@ -923,10 +955,6 @@ private fun TravelRowCard(
         }
     }
 }
-
-/* =========================
-   Lógica Auxiliar (Fechas y Cálculos)
-   ========================= */
 
 private fun datesBetweenInclusive(from: LocalDate, to: LocalDate): List<LocalDate> {
     if (to.isBefore(from)) return emptyList()
