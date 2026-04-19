@@ -1,4 +1,7 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vtsen.hashnode.dev.newemptycomposeimport android.net.Uri
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
+
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
@@ -30,6 +33,9 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 
+/**
+ * Estructura para snapshots económicos al cerrar viajes.
+ */
 data class ParamSnapshots(
     val costeKmOperativo: Double,
     val costeDietaFija: Double,
@@ -48,7 +54,7 @@ class ActivityViewModel(
     private val zone: ZoneId = ZoneId.systemDefault()
 
     // =========================
-    // 0) Billing Period (DataStore) — source of truth
+    // 0) PERIODO DE FACTURACIÓN (DataStore)
     // =========================
 
     val billingPeriod: StateFlow<BillingPeriod> =
@@ -73,8 +79,9 @@ class ActivityViewModel(
     val periodDates: StateFlow<Pair<LocalDate, LocalDate>> =
         billingPeriod
             .map {
-                BillingPeriodStore.millisToLocalDateOrToday(it.fromMillis, zone) to
-                    BillingPeriodStore.millisToLocalDateOrToday(it.toMillis, zone)
+                val start = BillingPeriodStore.millisToLocalDateOrToday(it.fromMillis, zone)
+                val end = BillingPeriodStore.millisToLocalDateOrToday(it.toMillis, zone)
+                start to end
             }
             .stateIn(
                 viewModelScope,
@@ -83,7 +90,9 @@ class ActivityViewModel(
             )
 
     init {
-        viewModelScope.launch { BillingPeriodStore.ensureInitialized(appContext, zone) }
+        viewModelScope.launch {
+            BillingPeriodStore.ensureInitialized(appContext, zone)
+        }
     }
 
     fun setBillingPeriodDates(from: LocalDate, to: LocalDate) {
@@ -103,16 +112,12 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * Compat UI: antes setStopsRange mutaba un range interno.
-     * Ahora: escribe periodo en DataStore.
-     */
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
         setBillingPeriodMillis(fromMillis, toMillis)
     }
 
     // =========================
-    // 1) Travels flows
+    // 1) FLUJOS DE VIAJES
     // =========================
 
     val allTravels: StateFlow<List<TravelEntity>> =
@@ -129,15 +134,8 @@ class ActivityViewModel(
             initialValue = null
         )
 
-    val exportData: StateFlow<List<TravelEntity>> =
-        repository.closedTravels.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5_000),
-            initialValue = emptyList()
-        )
-
     // =========================
-    // 2) Stops del viaje en curso
+    // 2) FLUJOS DE PARADAS
     // =========================
 
     val stopsForCurrentTravel: StateFlow<List<TravelStopEntity>> =
@@ -151,10 +149,6 @@ class ActivityViewModel(
                 started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyList()
             )
-
-    // =========================
-    // 3) Stops del periodo (timeline)
-    // =========================
 
     val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
         billingPeriod
@@ -173,7 +167,7 @@ class ActivityViewModel(
             )
 
     // =========================
-    // 4) PARADAS (solo EN CURSO)
+    // 3) GESTIÓN DE PARADAS (Lógica)
     // =========================
 
     fun validateStopKm(kmOdometer: Int?): String? {
@@ -194,7 +188,6 @@ class ActivityViewModel(
         val t = currentTravel.value ?: return false
         if (t.status != TravelStatus.IN_PROGRESS) return false
         if (place.isBlank()) return false
-        if (kmOdometer != null && kmOdometer < 0) return false
 
         viewModelScope.launch {
             stopRepository.upsert(
@@ -211,9 +204,7 @@ class ActivityViewModel(
     fun updateStop(stopId: String, place: String, kmOdometer: Int?): Boolean {
         val t = currentTravel.value ?: return false
         if (t.status != TravelStatus.IN_PROGRESS) return false
-        if (place.isBlank()) return false
-        if (kmOdometer != null && kmOdometer < 0) return false
-
+        
         val old = stopsForCurrentTravel.value.firstOrNull { it.id == stopId } ?: return false
 
         viewModelScope.launch {
@@ -229,7 +220,7 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 5) VIAJES
+    // 4) GESTIÓN DE VIAJES
     // =========================
 
     fun startTravel(
@@ -240,9 +231,7 @@ class ActivityViewModel(
         billingExpected: Double,
         hasDiet: Boolean
     ): Boolean {
-        if (origin.isBlank() || destination.isBlank()) return false
-        if (kmStart <= 0) return false
-        if (billingExpected < 0) return false
+        if (origin.isBlank() || destination.isBlank() || kmStart <= 0) return false
 
         viewModelScope.launch {
             repository.insertTravel(
@@ -279,36 +268,19 @@ class ActivityViewModel(
         viewModelScope.launch { repository.deleteTravel(travelId) }
     }
 
-    fun updateKmStart(kmStart: Int): Boolean {
-        val current = currentTravel.value ?: return false
-        if (kmStart <= 0) return false
-        viewModelScope.launch { repository.updateKmStart(current.id, kmStart) }
-        return true
-    }
-
     fun closeCurrentTravel(kmEnd: Int, hoursImputed: Double, hoursCalculated: Double): Boolean {
         val defaults = ParamSnapshots(
-            costeKmOperativo = 0.19,
-            costeDietaFija = 12.0,
-            porcBenefExigidoA = 0.35,
-            costeHoraAlejandro = 26.0,
-            costeHoraEmpresaX = 36.65,
-            tarifaObjetivoY = 42.14
+            costeKmOperativo = 0.19, costeDietaFija = 12.0, porcBenefExigidoA = 0.35,
+            costeHoraAlejandro = 26.0, costeHoraEmpresaX = 36.65, tarifaObjetivoY = 42.14
         )
         return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
     }
 
     fun closeCurrentTravelWithSnapshots(
-        kmEnd: Int,
-        hoursImputed: Double,
-        hoursCalculated: Double,
-        snaps: ParamSnapshots
+        kmEnd: Int, hoursImputed: Double, hoursCalculated: Double, snaps: ParamSnapshots
     ): Boolean {
         val current = currentTravel.value ?: return false
-
-        if (kmEnd < current.kmStart) return false
-        if (hoursImputed <= 0.0) return false
-        if (hoursCalculated <= 0.0) return false
+        if (kmEnd < current.kmStart || hoursImputed <= 0.0 || hoursCalculated <= 0.0) return false
 
         val delta = hoursImputed - hoursCalculated
         val modified = abs(delta) > 0.01
@@ -336,7 +308,7 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 6) BACKUP / RESTORE (mantener)
+    // 5) BACKUP / RESTORE TOTAL
     // =========================
 
     suspend fun buildSnapshotForBackup(): BackupSnapshot {
@@ -345,7 +317,6 @@ class ActivityViewModel(
 
         val holidays = CalendarOverridesStore.holidaysFlow(appContext).first()
         val vacations = CalendarOverridesStore.vacationsFlow(appContext).first()
-
         val travels = allTravels.value
         val stops = stopRepository.allStopsOnce()
 
@@ -366,6 +337,7 @@ class ActivityViewModel(
         repository.upsertAll(snapshot.travels)
         stopRepository.upsertAll(snapshot.stops)
 
+        // Reset calendarios
         val existingH = CalendarOverridesStore.holidaysFlow(appContext).first()
         existingH.forEach { h ->
             CalendarOverridesStore.removeHolidayRaw(appContext, CalendarOverridesStore.toRawHoliday(h))
@@ -375,12 +347,8 @@ class ActivityViewModel(
             CalendarOverridesStore.removeVacationRaw(appContext, CalendarOverridesStore.toRawVacation(v))
         }
 
-        snapshot.holidays.forEach { h ->
-            CalendarOverridesStore.addHoliday(appContext, h.date, h.description)
-        }
-        snapshot.vacations.forEach { v ->
-            CalendarOverridesStore.addVacation(appContext, v.from, v.to, v.description)
-        }
+        snapshot.holidays.forEach { h -> CalendarOverridesStore.addHoliday(appContext, h.date, h.description) }
+        snapshot.vacations.forEach { v -> CalendarOverridesStore.addVacation(appContext, v.from, v.to, v.description) }
 
         snapshot.billingPeriod?.let { p ->
             BillingPeriodStore.savePeriod(appContext, p.fromMillis, p.toMillis)
@@ -388,12 +356,30 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 7) EXPORT (modo carpeta) — compat
+    // 6) EXPORT / IMPORT (Drive)
     // =========================
 
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
+
+    private val _exportError = MutableStateFlow<String?>(null)
+    val exportError: StateFlow<String?> = _exportError.asStateFlow()
+
+    private val _isImporting = MutableStateFlow(false)
+    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    private val _importError = MutableStateFlow<String?>(null)
+    val importError: StateFlow<String?> = _importError.asStateFlow()
+
+    private val _lastImportResult = MutableStateFlow<AxisImportCoordinator.ImportResult?>(null)
+    val lastImportResult: StateFlow<AxisImportCoordinator.ImportResult?> = _lastImportResult.asStateFlow()
+
+    fun clearExportError() { _exportError.value = null }
+    fun clearImportError() { _importError.value = null }
+
+    // --- MODO A: Carpeta (Tree Uri) ---
     fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
         if (_isExporting.value) return
-
         viewModelScope.launch {
             _isExporting.value = true
             _exportError.value = null
@@ -417,13 +403,9 @@ class ActivityViewModel(
         }
     }
 
-    // =========================
-    // ✅ 8) EXPORT (modo archivo maestro por URI) — PRINCIPAL para la Tab A9+
-    // =========================
-
+    // --- MODO B: Archivo Maestro Directo (URI Individual) ---
     fun exportToMasterFileUri(masterFileUri: Uri) {
         if (_isExporting.value) return
-
         viewModelScope.launch {
             _isExporting.value = true
             _exportError.value = null
@@ -433,57 +415,29 @@ class ActivityViewModel(
                     val stopsSnapshot = stopRepository.allStopsOnce()
 
                     val resolver = appContext.contentResolver
+                    // "wt" para truncar y escribir (sobrescribir manteniendo ID)
                     resolver.openOutputStream(masterFileUri, "wt")?.use { os ->
                         AxisUnifiedCsvExporter.writeCsv(os, travelsSnapshot, stopsSnapshot)
-                    } ?: throw IllegalStateException("No se pudo abrir OutputStream del maestro (URI)")
+                    } ?: throw IllegalStateException("No se pudo abrir OutputStream del maestro")
                 }
             } catch (e: Exception) {
-                _exportError.value = e.localizedMessage ?: "Error desconocido"
+                _exportError.value = e.localizedMessage ?: "Error de escritura"
             } finally {
                 _isExporting.value = false
             }
         }
     }
 
-    fun exportBackupToFileUri(backupFileUri: Uri) {
-        if (_isExporting.value) return
-
-        viewModelScope.launch {
-            _isExporting.value = true
-            _exportError.value = null
-            try {
-                withContext(Dispatchers.IO) {
-                    val travelsSnapshot = allTravels.value
-                    val stopsSnapshot = stopRepository.allStopsOnce()
-
-                    val resolver = appContext.contentResolver
-                    resolver.openOutputStream(backupFileUri, "wt")?.use { os ->
-                        AxisUnifiedCsvExporter.writeCsv(os, travelsSnapshot, stopsSnapshot)
-                    } ?: throw IllegalStateException("No se pudo abrir OutputStream del backup (URI)")
-                }
-            } catch (e: Exception) {
-                _exportError.value = e.localizedMessage ?: "Error desconocido"
-            } finally {
-                _isExporting.value = false
-            }
-        }
-    }
-
-    // =========================
-    // 9) IMPORT desde Drive (CSV unificado)
-    // =========================
-
+    // --- IMPORTACIÓN ---
     fun importFromDriveCsv(
         csvUri: Uri,
         strategy: AxisImportCoordinator.ImportStrategy = AxisImportCoordinator.ImportStrategy.REPLACE_ALL
     ) {
         if (_isImporting.value) return
-
         viewModelScope.launch {
             _isImporting.value = true
             _importError.value = null
             _lastImportResult.value = null
-
             try {
                 val result = AxisImportCoordinator.importFromUnifiedCsvUri(
                     context = appContext,
@@ -495,34 +449,10 @@ class ActivityViewModel(
                 )
                 _lastImportResult.value = result
             } catch (e: Exception) {
-                _importError.value = e.localizedMessage ?: "Error desconocido"
+                _importError.value = e.localizedMessage ?: "Error de importación"
             } finally {
                 _isImporting.value = false
             }
         }
     }
-
-    fun clearExportError() { _exportError.value = null }
-    fun clearImportError() { _importError.value = null }
-
-    // =========================
-    // 10) Flags UI (Export / Import)
-    // =========================
-    private val _isExporting = MutableStateFlow(false)
-    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
-
-    private val _exportError = MutableStateFlow<String?>(null)
-    val exportError: StateFlow<String?> = _exportError.asStateFlow()
-
-    private val _isImporting = MutableStateFlow(false)
-    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
-
-    private val _importError = MutableStateFlow<String?>(null)
-    val importError: StateFlow<String?> = _importError.asStateFlow()
-
-    private val _lastImportResult = MutableStateFlow<AxisImportCoordinator.ImportResult?>(null)
-    val lastImportResult: StateFlow<AxisImportCoordinator.ImportResult?> = _lastImportResult.asStateFlow()
 }
-
-
-import android.content.Context
