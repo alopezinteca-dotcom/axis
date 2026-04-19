@@ -1,11 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
+import android.content.compose.rememberLauncherForActivityResultimport android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -108,17 +103,15 @@ fun ActivityHomeScreen(
     val fromDate = periodDates.first
     val toDate = periodDates.second
 
-    // Export state
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle(initialValue = false)
     val exportError by viewModel.exportError.collectAsStateWithLifecycle(initialValue = null)
 
-    // Import state
     val isImporting by viewModel.isImporting.collectAsStateWithLifecycle(initialValue = false)
     val importError by viewModel.importError.collectAsStateWithLifecycle(initialValue = null)
     val lastImportResult by viewModel.lastImportResult.collectAsStateWithLifecycle(initialValue = null)
 
     // =========================
-    // Feedback Snackbars
+    // Snackbars
     // =========================
     LaunchedEffect(exportError) {
         exportError?.let {
@@ -143,7 +136,12 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Calendar overrides (Festivos y Vacaciones)
+    // Preferencia: URI del archivo maestro
+    // =========================
+    var masterFileUri by remember { mutableStateOf(ExportPreferences.getMasterFileUri(context)) }
+
+    // =========================
+    // Calendar overrides
     // =========================
     val allHolidays by CalendarOverridesStore.holidaysFlow(context)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -169,7 +167,6 @@ fun ActivityHomeScreen(
     val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
         derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
     }
-
     val holidayByDateInPeriod by remember(holidaysInPeriod) {
         derivedStateOf { holidaysInPeriod.associateBy { it.date } }
     }
@@ -177,22 +174,20 @@ fun ActivityHomeScreen(
     val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { allVacations.filter { v -> !(v.to.isBefore(fromDate) || v.from.isAfter(toDate)) } }
     }
-
     val vacationDatesInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
         derivedStateOf { expandVacationDates(vacationsInPeriod, fromDate, toDate) }
     }
-
     val vacationDescsByDateInPeriod by remember(vacationsInPeriod, fromDate, toDate) {
         derivedStateOf { buildVacationDescriptionsByDate(vacationsInPeriod, fromDate, toDate) }
     }
 
     // =========================
-    // Gestión del Tiempo (Rango y Timeline)
+    // Timeline del periodo visible
     // =========================
     val fromMillis = remember(fromDate, zone) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
     val toMillis = remember(toDate, zone) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
 
-    // Sincronizar paradas del periodo con el ViewModel (compat)
+    // Mantener stops del periodo sincronizados en VM (compat)
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis > 0L && toMillis > 0L) viewModel.setStopsRange(fromMillis, toMillis)
     }
@@ -218,14 +213,12 @@ fun ActivityHomeScreen(
     val totalEstimadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.sumOf { it.billingExpected } }
     }
-
     val horasImputadasPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
                 .sumOf { it.hoursImputed ?: 0.0 }
         }
     }
-
     val kmPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
@@ -240,7 +233,6 @@ fun ActivityHomeScreen(
                 countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
         }
     }
-
     val diasLaborables = diasLaborablesReales.coerceAtLeast(0)
     val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
     val horasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
@@ -259,7 +251,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Date pickers (Desde / Hasta)
+    // Pickers Desde / Hasta
     // =========================
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
@@ -308,46 +300,37 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // SAF (Drive) Launchers
+    // SAF: Crear Archivo Maestro (Drive aparece aquí)
     // =========================
+    val createMasterLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
 
-    // Export folder picker (tree)
-    val folderPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
-        val uri = result.data?.data ?: return@rememberLauncherForActivityResult
-
-        val flags = result.data?.flags ?: 0
-        val takeFlags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        runCatching { context.contentResolver.takePersistableUriPermission(uri, takeFlags) }
-
-        ExportPreferences.saveFolderUri(context, uri)
-        viewModel.exportMasterAndMaybeBackupToDrive(uri)
-
-        coroutineScope.launch { snackbarHostState.showSnackbar("✅ Carpeta seleccionada. Exportando…") }
-    }
-
-    fun launchFolderPickerSaf() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
         }
-        // Ayuda a que aparezca Drive en algunos dispositivos
-        try { intent.setPackage("com.android.documentsui") } catch (_: Exception) {}
 
-        try {
-            folderPickerLauncher.launch(intent)
-        } catch (_: ActivityNotFoundException) {
-            intent.setPackage(null)
-            folderPickerLauncher.launch(intent)
-        } catch (_: Exception) {
-            intent.setPackage(null)
-            folderPickerLauncher.launch(intent)
+        ExportPreferences.saveMasterFileUri(context, uri)
+        masterFileUri = uri
+
+        viewModel.exportToMasterFileUri(uri)
+
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("✅ Maestro creado/configurado. Exportando…")
         }
     }
 
-    // Import file picker (CSV)
+    fun launchCreateMaster() {
+        createMasterLauncher.launch("AXIS_Master_Database.csv")
+    }
+
+    // =========================
+    // SAF: Import CSV
+    // =========================
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showImportConfirm by remember { mutableStateOf(false) }
 
@@ -355,10 +338,7 @@ fun ActivityHomeScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-
-        // Intentar persistir permiso lectura (puede fallar según proveedor)
         runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-
         pendingImportUri = uri
         showImportConfirm = true
     }
@@ -373,7 +353,7 @@ fun ActivityHomeScreen(
             title = { Text("Importar CSV", fontWeight = FontWeight.Bold) },
             text = {
                 Text(
-                    "⚠️ Esta acción REEMPLAZA TODO: se borrarán los datos locales (Room) y se restaurarán desde el CSV seleccionado.\n\n¿Continuar?"
+                    "⚠️ Esta acción REEMPLAZA TODO: se borrarán los datos locales y se restaurarán desde el CSV.\n\n¿Continuar?"
                 )
             },
             confirmButton = {
@@ -682,7 +662,7 @@ fun ActivityHomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // IZQ: KPIs + Export/Import
+            // IZQ: KPIs + acciones
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -726,12 +706,24 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Export
+                Button(
+                    onClick = { launchCreateMaster() },
+                    enabled = !isExporting && !isImporting,
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    Text("☁️ CONFIGURAR DRIVE (CREAR MAESTRO)", fontWeight = FontWeight.Bold)
+                }
+
                 Button(
                     onClick = {
-                        val folder = ExportPreferences.getFolderUri(context)
-                        if (folder == null) launchFolderPickerSaf()
-                        else viewModel.exportMasterAndMaybeBackupToDrive(folder)
+                        val uri = masterFileUri
+                        if (uri == null) {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("⚠️ Primero crea/configura el Maestro en Drive.")
+                            }
+                        } else {
+                            viewModel.exportToMasterFileUri(uri)
+                        }
                     },
                     enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -742,17 +734,12 @@ fun ActivityHomeScreen(
                             Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
                         }
                     } else {
-                        Text("📤 EXPORTAR MAESTRO A DRIVE", fontWeight = FontWeight.Bold)
+                        Text("📤 EXPORTAR A MAESTRO (DRIVE)", fontWeight = FontWeight.Bold)
                     }
-                }
-
-                TextButton(onClick = { launchFolderPickerSaf() }, modifier = Modifier.fillMaxWidth()) {
-                    Text("⚙️ Cambiar carpeta de exportación")
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Import
                 Button(
                     onClick = { launchImportCsvPicker() },
                     enabled = !isExporting && !isImporting,
@@ -767,15 +754,9 @@ fun ActivityHomeScreen(
                         Text("📥 IMPORTAR CSV (DRIVE)", fontWeight = FontWeight.Bold)
                     }
                 }
-
-                Text(
-                    "⚠️ Importar reemplaza TODO tu Room local.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
             }
 
-            // DER: Timeline diario
+            // DER: timeline
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -787,7 +768,6 @@ fun ActivityHomeScreen(
                         val isWeekend = day.isWeekend()
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
-
                         val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
@@ -855,7 +835,10 @@ fun ActivityHomeScreen(
                                     dateFormatter = dateFormatter,
                                     onToggleInvoiced = { checked -> viewModel.setFacturado(tr.id, checked) },
                                     onEdit = { openEditDialog(tr) },
-                                    onDelete = { travelToDeleteId = tr.id; showDeleteConfirm = true }
+                                    onDelete = {
+                                        travelToDeleteId = tr.id
+                                        showDeleteConfirm = true
+                                    }
                                 )
                             }
                         }
@@ -924,14 +907,9 @@ private fun TravelRowCard(
                 Column(Modifier.weight(1f)) {
                     Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
                     if (travel.description.isNotBlank()) {
-                        Text(
-                            "Ref: ${travel.description}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = onEdit) { Text("✏️") }
                     TextButton(onClick = onDelete) { Text("🗑️") }
@@ -1070,3 +1048,4 @@ private fun DayHeader(
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
 private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
+import android.net.Uri
