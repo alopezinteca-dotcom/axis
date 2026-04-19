@@ -4,6 +4,7 @@ import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.nio.charset.Charset
+import java.lang.StringBuilder
 
 /**
  * Importador del CSV unificado (TRAVEL/STOP) generado por AxisUnifiedCsvExporter.
@@ -27,13 +28,13 @@ object AxisUnifiedCsvImporter {
         val origin: String,
         val destination: String,
         val description: String,
-        val status: String,             // enum name
+        val status: String,              // enum name
         val kmStart: String,
         val kmEnd: String,
         val kmTotal: String,
-        val hasDiet: String,            // "1"/"0"
-        val billingExpected: String,    // "12.34"
-        val isInvoiced: String,         // "1"/"0"
+        val hasDiet: String,             // "1"/"0"
+        val billingExpected: String,     // "12.34"
+        val isInvoiced: String,          // "1"/"0"
         val hoursCalcSnapshot: String,
         val hoursImputed: String,
         val hoursDraft: String
@@ -64,10 +65,14 @@ object AxisUnifiedCsvImporter {
 
             br.lineSequence().forEach { rawLine ->
                 val line = rawLine.trim()
-                if (line.isBlank()) return@forEach
+                if (line.isBlank()) {
+                    return@forEach
+                }
 
                 // Excel hack: "sep=,"
-                if (line.startsWith("sep=", ignoreCase = true)) return@forEach
+                if (line.startsWith("sep=", ignoreCase = true)) {
+                    return@forEach
+                }
 
                 // La primera línea no vacía debe ser cabecera
                 if (!headerRead) {
@@ -76,31 +81,14 @@ object AxisUnifiedCsvImporter {
                 }
 
                 val cols = parseCsvLine(line)
-                if (cols.isEmpty()) return@forEach
+                if (cols.isEmpty()) {
+                    return@forEach
+                }
 
                 val rowType = cols.getOrNull(0)?.trim().orEmpty()
 
                 when (rowType) {
                     "TRAVEL" -> {
-                        // Índices según header del exporter:
-                        // 0 row_type
-                        // 1 travel_id
-                        // 2 travel_date
-                        // 3 travel_time_start
-                        // 4 travel_time_end
-                        // 5 origin
-                        // 6 destination
-                        // 7 description
-                        // 8 status
-                        // 9 km_start
-                        // 10 km_end
-                        // 11 km_total
-                        // 12 has_diet
-                        // 13 billing_expected
-                        // 14 is_invoiced
-                        // 15 hours_calc_snapshot
-                        // 16 hours_imputed
-                        // 17 hours_draft
                         val t = TravelRow(
                             travelId = cols.getOrNull(1).orEmpty(),
                             travelDate = cols.getOrNull(2).orEmpty(),
@@ -120,19 +108,12 @@ object AxisUnifiedCsvImporter {
                             hoursImputed = cols.getOrNull(16).orEmpty(),
                             hoursDraft = cols.getOrNull(17).orEmpty()
                         )
-                        if (t.travelId.isNotBlank()) travels.add(t)
+                        if (t.travelId.isNotBlank()) {
+                            travels.add(t)
+                        }
                     }
 
                     "STOP" -> {
-                        // 0 row_type
-                        // 1 travel_id
-                        // 2 travel_date
-                        // ...
-                        // 18 stop_id
-                        // 19 stop_timestamp
-                        // 20 stop_time
-                        // 21 stop_place
-                        // 22 stop_km_odometer
                         val s = StopRow(
                             stopId = cols.getOrNull(18).orEmpty(),
                             travelId = cols.getOrNull(1).orEmpty(),
@@ -142,11 +123,9 @@ object AxisUnifiedCsvImporter {
                             stopPlace = cols.getOrNull(21).orEmpty(),
                             stopKmOdometer = cols.getOrNull(22).orEmpty()
                         )
-                        if (s.stopId.isNotBlank() && s.travelId.isNotBlank()) stops.add(s)
-                    }
-
-                    else -> {
-                        // ignorar filas desconocidas
+                        if (s.stopId.isNotBlank() && s.travelId.isNotBlank()) {
+                            stops.add(s)
+                        }
                     }
                 }
             }
@@ -156,10 +135,7 @@ object AxisUnifiedCsvImporter {
     }
 
     /**
-     * Parser CSV simple compatible con:
-     * - campos entrecomillados: "texto, con comas"
-     * - comillas escapadas: "" dentro de un campo entrecomillado
-     * - separador: coma
+     * Parser CSV compatible con campos entrecomillados y comillas escapadas.
      */
     private fun parseCsvLine(line: String): List<String> {
         val out = ArrayList<String>()
@@ -172,10 +148,11 @@ object AxisUnifiedCsvImporter {
             when {
                 c == '"' -> {
                     if (inQuotes) {
+                        // Verificar si es una comilla escapada ("")
                         val nextIsQuote = (i + 1 < line.length && line[i + 1] == '"')
                         if (nextIsQuote) {
                             sb.append('"')
-                            i++ // saltar la segunda comilla
+                            i++ // Saltar la segunda comilla
                         } else {
                             inQuotes = false
                         }
@@ -189,7 +166,9 @@ object AxisUnifiedCsvImporter {
                     sb.setLength(0)
                 }
 
-                else -> sb.append(c)
+                else -> {
+                    sb.append(c)
+                }
             }
             i++
         }
