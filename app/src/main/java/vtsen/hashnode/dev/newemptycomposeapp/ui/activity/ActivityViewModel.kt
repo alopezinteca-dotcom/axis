@@ -27,6 +27,7 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopRepository
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisBackupCoordinator
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisImportCoordinator
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriod
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
@@ -52,10 +53,6 @@ class ActivityViewModel(
     // 0) Billing Period (DataStore) — source of truth
     // =========================
 
-    /**
-     * Si tienes implementado periodFlowResolved/ensureInitialized en BillingPeriodStore, úsalo.
-     * Si no lo tienes, cambia por periodFlowRaw(context) según tu store.
-     */
     val billingPeriod: StateFlow<BillingPeriod> =
         BillingPeriodStore.periodFlowResolved(appContext, zone)
             .distinctUntilChanged()
@@ -110,10 +107,6 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * Compat con tu UI: antes setStopsRange mutaba un range interno.
-     * Ahora: escribe periodo en DataStore (source of truth).
-     */
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
         setBillingPeriodMillis(fromMillis, toMillis)
     }
@@ -144,7 +137,7 @@ class ActivityViewModel(
         )
 
     // =========================
-    // 2) Stops del viaje en curso  ✅ (se mantiene)
+    // 2) Stops del viaje en curso
     // =========================
 
     val stopsForCurrentTravel: StateFlow<List<TravelStopEntity>> =
@@ -346,11 +339,6 @@ class ActivityViewModel(
     // 6) BACKUP / RESTORE (se mantiene)
     // =========================
 
-    /**
-     * IMPORTANTE:
-     * Antes usabas stopsInPeriod (solo rango). Ahora que tenemos allStopsOnce(),
-     * hacemos snapshot completo de stops para que la restauración sea realmente "total".
-     */
     suspend fun buildSnapshotForBackup(): BackupSnapshot {
         val bp = runCatching { BillingPeriodStore.periodFlowRaw(appContext).first() }
             .getOrElse { billingPeriod.value }
@@ -359,7 +347,7 @@ class ActivityViewModel(
         val vacations = CalendarOverridesStore.vacationsFlow(appContext).first()
 
         val travels = allTravels.value
-        val stops = stopRepository.allStopsOnce() // ✅ snapshot completo
+        val stops = stopRepository.allStopsOnce() // snapshot completo
 
         return BackupSnapshot(
             createdAtMillis = System.currentTimeMillis(),
@@ -372,15 +360,12 @@ class ActivityViewModel(
     }
 
     suspend fun restoreFromSnapshot(snapshot: BackupSnapshot) {
-        // 1) Wipe total
         repository.deleteAll()
         stopRepository.deleteAll()
 
-        // 2) Restore datos (Travel primero, Stops después por FK)
         repository.upsertAll(snapshot.travels)
         stopRepository.upsertAll(snapshot.stops)
 
-        // 3) Restore calendario (borrar lo actual)
         val existingH = CalendarOverridesStore.holidaysFlow(appContext).first()
         existingH.forEach { h ->
             CalendarOverridesStore.removeHolidayRaw(appContext, CalendarOverridesStore.toRawHoliday(h))
@@ -397,25 +382,15 @@ class ActivityViewModel(
             CalendarOverridesStore.addVacation(appContext, v.from, v.to, v.description)
         }
 
-        // 4) Restore periodo
         snapshot.billingPeriod?.let { p ->
             BillingPeriodStore.savePeriod(appContext, p.fromMillis, p.toMillis)
         }
     }
 
     // =========================
-    // 7) Export a Drive: Maestro + Backup semanal (NUEVO)
+    // 7) EXPORT Maestro + Backup semanal (Drive)
     // =========================
 
-    /**
-     * Export recomendado:
-     * - Siempre: AXIS_Master_Database.csv (TODOS los viajes + TODAS las paradas)
-     * - Cada 7 días: AXIS_Backup_yyyy_MM_dd.csv (según ExportPreferences.last_backup_timestamp)
-     *
-     * Requiere:
-     * - stopRepository.allStopsOnce()
-     * - AxisBackupCoordinator (usa AxisFileManager Drive-safe)
-     */
     fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
         if (_isExporting.value) return
 
@@ -443,7 +418,52 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 8) Export flags (UI)
+    // 8) ✅ IMPORT desde Drive (CSV unificado) — NUEVO
+    // =========================
+
+    /**
+     * Importa un CSV unificado exportado por la app (TRAVEL/STOP).
+     *
+     * REPLACE_ALL (recomendado):
+     * - borra DB y restaura desde el CSV
+     *
+     * MERGE:
+     * - upsert sin borrar (mezcla)
+     */
+    fun importFromDriveCsv(
+        csvUri: Uri,
+        strategy: AxisImportCoordinator.ImportStrategy = AxisImportCoordinator.ImportStrategy.REPLACE_ALL
+    ) {
+        if (_isImporting.value) return
+
+        viewModelScope.launch {
+            _isImporting.value = true
+            _importError.value = null
+            _lastImportResult.value = null
+
+            try {
+                val result = AxisImportCoordinator.importFromUnifiedCsvUri(
+                    context = appContext,
+                    csvUri = csvUri,
+                    travelRepository = repository,
+                    stopRepository = stopRepository,
+                    strategy = strategy,
+                    zone = zone
+                )
+                _lastImportResult.value = result
+            } catch (e: Exception) {
+                _importError.value = e.localizedMessage ?: "Error desconocido"
+            } finally {
+                _isImporting.value = false
+            }
+        }
+    }
+
+    fun clearImportError() { _importError.value = null }
+    fun clearExportError() { _exportError.value = null }
+
+    // =========================
+    // 9) Flags UI (Export / Import)
     // =========================
     private val _isExporting = MutableStateFlow(false)
     val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
@@ -451,6 +471,12 @@ class ActivityViewModel(
     private val _exportError = MutableStateFlow<String?>(null)
     val exportError: StateFlow<String?> = _exportError.asStateFlow()
 
-    fun setExporting(value: Boolean) { _isExporting.value = value }
-    fun setExportError(msg: String?) { _exportError.value = msg }
+    private val _isImporting = MutableStateFlow(false)
+    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+
+    private val _importError = MutableStateFlow<String?>(null)
+    val importError: StateFlow<String?> = _importError.asStateFlow()
+
+    private val _lastImportResult = MutableStateFlow<AxisImportCoordinator.ImportResult?>(null)
+    val lastImportResult: StateFlow<AxisImportCoordinator.ImportResult?> = _lastImportResult.asStateFlow()
 }
