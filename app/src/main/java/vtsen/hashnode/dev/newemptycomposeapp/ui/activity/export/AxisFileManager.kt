@@ -1,4 +1,11 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.exportpackage vtsen.hashnode.dev.newemptycomposeapp.uiapp.ui.activity.data.TravelStopEntity
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export
+
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import java.io.OutputStream
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 
 /**
  * AxisFileManager
@@ -105,9 +112,3 @@ object AxisFileManager {
         return stream ?: throw IllegalStateException("No se pudo abrir OutputStream para escribir en '$fileUri'")
     }
 }
-
-import android.content.Context
-import android.net.Uri
-import android.provider.DocumentsContract
-import java.io.OutputStream
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
