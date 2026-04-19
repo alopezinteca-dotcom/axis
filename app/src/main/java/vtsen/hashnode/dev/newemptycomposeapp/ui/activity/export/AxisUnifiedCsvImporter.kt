@@ -9,8 +9,8 @@ import java.nio.charset.Charset
  * Importador del CSV unificado (TRAVEL/STOP) generado por AxisUnifiedCsvExporter.
  *
  * - Soporta campos con comillas y comas dentro (CSV estándar).
- * - Ignora línea opcional "sep=," (a veces útil para Excel).
- * - No depende de Room ni de entidades: devuelve estructuras "row" listas para mapear a TravelEntity/TravelStopEntity.
+ * - Ignora línea opcional "sep=," (útil para Excel a veces).
+ * - No depende de Room ni de entidades: devuelve estructuras "row" listas para mapear.
  */
 object AxisUnifiedCsvImporter {
 
@@ -61,6 +61,7 @@ object AxisUnifiedCsvImporter {
 
         BufferedReader(InputStreamReader(input, charset)).use { br ->
             var headerRead = false
+
             br.lineSequence().forEach { rawLine ->
                 val line = rawLine.trim()
                 if (line.isBlank()) return@forEach
@@ -75,11 +76,10 @@ object AxisUnifiedCsvImporter {
                 }
 
                 val cols = parseCsvLine(line)
-
-                // Esperamos al menos row_type y travel_id
                 if (cols.isEmpty()) return@forEach
 
                 val rowType = cols.getOrNull(0)?.trim().orEmpty()
+
                 when (rowType) {
                     "TRAVEL" -> {
                         // Índices según header del exporter:
@@ -172,7 +172,6 @@ object AxisUnifiedCsvImporter {
             when {
                 c == '"' -> {
                     if (inQuotes) {
-                        // ¿comilla escapada?
                         val nextIsQuote = (i + 1 < line.length && line[i + 1] == '"')
                         if (nextIsQuote) {
                             sb.append('"')
