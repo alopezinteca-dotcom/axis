@@ -21,20 +21,20 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopReposito
  * - Lee CSV unificado desde SAF/Drive (Uri)
  * - Parsea TRAVEL/STOP
  * - Convierte a entidades
- * - Restaura en Room en orden (travels -> stops)
+ * - Restaura en Room en orden (travels -> stops) por FK
  */
 object AxisImportCoordinator {
 
     enum class ImportStrategy {
         /**
-         * Borra todo y restaura desde el CSV.
-         * Recomendado para "cambiar de móvil" o "otra versión".
+         * Borra TODO y restaura desde el CSV.
+         * Recomendado para "cambio de móvil" / "otra versión".
          */
         REPLACE_ALL,
 
         /**
          * Upsert sin borrar (mezcla).
-         * Útil si quieres importar solo "nuevos".
+         * Útil si quieres traer datos "nuevos" sin perder lo existente.
          */
         MERGE
     }
@@ -63,17 +63,18 @@ object AxisImportCoordinator {
             AxisUnifiedCsvImporter.parse(input)
         } ?: throw IllegalStateException("No se pudo abrir el CSV para importar")
 
-        // 1) Mapear travels
+        // 1) Mapear TRAVELS
         val travelEntities = parsed.travels.mapNotNull { row ->
             rowToTravelEntity(row, zone)
         }
 
+        // Conjunto de IDs válidos para filtrar stops huérfanas
         val travelIds = travelEntities.map { it.id }.toHashSet()
 
-        // 2) Mapear stops (solo si el viaje existe en este set)
+        // 2) Mapear STOPS (solo si travel existe)
         var skipped = 0
         val stopEntities = parsed.stops.mapNotNull { row ->
-            if (!travelIds.contains(row.travelId)) {
+            if (!travelIds.contains(row.travelId.trim())) {
                 skipped++
                 null
             } else {
@@ -111,12 +112,11 @@ object AxisImportCoordinator {
         val id = row.travelId.trim()
         if (id.isBlank()) return null
 
-        // Parse fecha y horas
+        // Fecha y horas (del exporter)
         val date = runCatching { LocalDate.parse(row.travelDate.trim(), dateFmt) }.getOrNull() ?: return null
         val startTime = runCatching { LocalTime.parse(row.travelTimeStart.trim(), timeFmt) }.getOrNull() ?: LocalTime.MIDNIGHT
 
-        val startTs = LocalDateTime.of(date, startTime)
-            .atZone(zone).toInstant().toEpochMilli()
+        val startTs = LocalDateTime.of(date, startTime).atZone(zone).toInstant().toEpochMilli()
 
         val endTs = row.travelTimeEnd.trim().takeIf { it.isNotBlank() }?.let { tStr ->
             val endTime = runCatching { LocalTime.parse(tStr, timeFmt) }.getOrNull()
@@ -127,25 +127,21 @@ object AxisImportCoordinator {
         val destination = row.destination
         val description = row.description
 
-        val kmStart = row.kmStart.toIntOrNull() ?: 0
-        val kmEnd = row.kmEnd.toIntOrNull()
+        val kmStart = row.kmStart.trim().toIntOrNull() ?: 0
+        val kmEnd = row.kmEnd.trim().toIntOrNull()
 
         val hasDiet = row.hasDiet.trim() == "1"
-        val billingExpected = parseDouble(row.billingExpected)
+        val billingExpected = parseDoubleOrZero(row.billingExpected)
 
-        val status = runCatching { TravelStatus.valueOf(row.status.trim()) }.getOrNull() ?: TravelStatus.IN_PROGRESS
+        val status = runCatching { TravelStatus.valueOf(row.status.trim()) }.getOrNull()
+            ?: TravelStatus.IN_PROGRESS
 
         val hoursDraft = parseNullableDouble(row.hoursDraft)
         val hoursCalcSnapshot = parseNullableDouble(row.hoursCalcSnapshot)
         val hoursImputed = parseNullableDouble(row.hoursImputed)
 
-        // Derivados si vienen horas
-        val deltaHours = if (hoursImputed != null && hoursCalcSnapshot != null) {
-            hoursImputed - hoursCalcSnapshot
-        } else {
-            null
-        }
-        
+        // Derivados (si vienen ambas horas)
+        val deltaHours = if (hoursImputed != null && hoursCalcSnapshot != null) (hoursImputed - hoursCalcSnapshot) else null
         val hoursModified = deltaHours?.let { abs(it) > 0.01 } ?: false
 
         val isInvoiced = row.isInvoiced.trim() == "1"
@@ -167,7 +163,7 @@ object AxisImportCoordinator {
             hoursImputed = hoursImputed,
             hoursModified = hoursModified,
             deltaHours = deltaHours,
-            impactEuroAlejandro = null, // No se exporta en CSV
+            impactEuroAlejandro = null, // no viene en CSV
             snapCosteKmOperativo = null,
             snapCosteDietaFija = null,
             snapPorcBenefExigidoA = null,
@@ -175,21 +171,21 @@ object AxisImportCoordinator {
             snapCosteHoraEmpresaX = null,
             snapTarifaObjetivoY = null,
             isInvoiced = isInvoiced,
-            endAddress = "" // No se exporta en CSV
+            endAddress = "" // no viene en CSV
         )
     }
 
     private fun rowToStopEntity(row: AxisUnifiedCsvImporter.StopRow): TravelStopEntity? {
-        val id = row.stopId.trim()
+        val stopId = row.stopId.trim()
         val travelId = row.travelId.trim()
-        if (id.isBlank() || travelId.isBlank()) return null
+        if (stopId.isBlank() || travelId.isBlank()) return null
 
         val ts = row.stopTimestamp.trim().toLongOrNull() ?: return null
         val place = row.stopPlace
         val km = row.stopKmOdometer.trim().toIntOrNull()
 
         return TravelStopEntity(
-            id = id,
+            id = stopId,
             travelId = travelId,
             timestamp = ts,
             place = place,
@@ -197,14 +193,14 @@ object AxisImportCoordinator {
         )
     }
 
-    private fun parseDouble(s: String): Double {
-        val x = s.trim()
+    private fun parseDoubleOrZero(raw: String): Double {
+        val x = raw.trim()
         if (x.isBlank()) return 0.0
         return x.replace(',', '.').toDoubleOrNull() ?: 0.0
     }
 
-    private fun parseNullableDouble(s: String): Double? {
-        val x = s.trim()
+    private fun parseNullableDouble(raw: String): Double? {
+        val x = raw.trim()
         if (x.isBlank()) return null
         return x.replace(',', '.').toDoubleOrNull()
     }
