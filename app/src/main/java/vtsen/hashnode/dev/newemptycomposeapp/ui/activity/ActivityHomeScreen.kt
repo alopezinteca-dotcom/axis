@@ -1,7 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -314,7 +313,6 @@ fun ActivityHomeScreen(
         return String.format(Locale.getDefault(), "%04d_%02d_%02d", now.year, now.monthValue, now.dayOfMonth)
     }
 
-    // Folder picker result (force DocumentsUI first) so Drive appears
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result: ActivityResult ->
@@ -330,28 +328,24 @@ fun ActivityHomeScreen(
         coroutineScope.launch { snackbarHostState.showSnackbar("✅ Carpeta AXIS configurada") }
     }
 
+    // ✅ Drive FIX: chooser + DocumentsUI como intent inicial
     fun launchPickAxisFolder() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+        val baseIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
 
-        // 1) Try DocumentsUI (shows Drive)
-        try {
-            intent.setPackage("com.android.documentsui")
-            folderPickerLauncher.launch(intent)
-            return
-        } catch (_: ActivityNotFoundException) {
-            // 2) fallback
-        } catch (_: Exception) {
-            // 2) fallback
+        val docsUi = Intent(baseIntent).apply { setPackage("com.android.documentsui") }
+        val chooser = Intent.createChooser(baseIntent, "Elegir carpeta AXIS (Drive)").apply {
+            // solo lo añadimos si existe
+            if (docsUi.resolveActivity(context.packageManager) != null) {
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(docsUi))
+            }
         }
 
-        intent.setPackage(null)
-        folderPickerLauncher.launch(intent)
+        folderPickerLauncher.launch(chooser)
     }
 
-    // Restore picker (.json.gz)
     var showRestoreConfirm by remember { mutableStateOf(false) }
     var pendingSnapshot by remember { mutableStateOf<BackupSnapshot?>(null) }
 
@@ -371,7 +365,6 @@ fun ActivityHomeScreen(
             }
         }
     }
-
     if (showRestoreConfirm && pendingSnapshot != null) {
         AlertDialog(
             onDismissRequest = { showRestoreConfirm = false },
@@ -421,7 +414,6 @@ fun ActivityHomeScreen(
         val resolver = context.contentResolver
         val axisDocId = DocumentsContract.getTreeDocumentId(axisTreeUri)
 
-        // Try overwrite existing first
         val existingId = findChildDocIdByName(axisTreeUri, axisDocId, fileName)
         if (existingId != null) {
             val docUri = DocumentsContract.buildDocumentUriUsingTree(axisTreeUri, existingId)
@@ -475,10 +467,8 @@ fun ActivityHomeScreen(
             try {
                 isExporting = true
                 withContext(Dispatchers.IO) {
-                    // 1) CSV diario fijo
                     writeCsvIntoAxisRoot(axis, dailyCsvName(), periodTravels, stopsInPeriod)
 
-                    // 2) Cierre mensual automático según toDate
                     val key = periodKey()
                     val lastClosed = ExportPreferences.getLastClosedKey(context)
                     if (lastClosed != key) {
@@ -486,7 +476,6 @@ fun ActivityHomeScreen(
                         ExportPreferences.setLastClosedKey(context, key)
                     }
 
-                    // 3) Backup diario (1 vez al día)
                     maybeDailyBackup(axis)
                 }
                 snackbarHostState.showSnackbar("✅ Export OK (CSV + backup si tocaba)")
@@ -498,9 +487,6 @@ fun ActivityHomeScreen(
         }
     }
 
-    // =========================
-    // UI: Gestión calendario (📅)
-    // =========================
     if (showCalendarManager) {
         CalendarManagementDialog(
             holidays = allHolidays,
@@ -519,7 +505,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Diálogo añadir festivo
     if (showAddHoliday) {
         AlertDialog(
             onDismissRequest = { showAddHoliday = false },
@@ -556,7 +541,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Diálogo añadir vacaciones
     if (showAddVacation) {
         AlertDialog(
             onDismissRequest = { showAddVacation = false },
@@ -598,7 +582,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Confirm borrar viaje
     if (showDeleteConfirm && travelToDeleteId != null) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
@@ -615,7 +598,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Diálogo editar viaje
     if (showEditDialog && editingTravelId != null) {
         val original = allTravels.firstOrNull { it.id == editingTravelId }
 
@@ -725,20 +707,12 @@ fun ActivityHomeScreen(
         )
     }
 
-    // =========================
-    // Scaffold principal
-    // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("AXIS · Activity") },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                actions = {
-                    TextButton(onClick = { showCalendarManager = true }) {
-                        Text("📅", fontSize = MaterialTheme.typography.titleLarge.fontSize)
-                    }
-                }
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             )
         },
         floatingActionButton = {
@@ -748,7 +722,6 @@ fun ActivityHomeScreen(
         }
     ) { padding ->
 
-        // Pickers desde/hasta
         if (showFromPicker) {
             DatePickerDialog(
                 onDismissRequest = { showFromPicker = false },
@@ -789,8 +762,6 @@ fun ActivityHomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-
-            // IZQUIERDA KPIs + Export + Restore
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -807,20 +778,6 @@ fun ActivityHomeScreen(
                             Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) {
                                 Text("Hasta: ${toDate.format(dateFormatter)}")
                             }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(
-                                onClick = {
-                                    val (mStart, mEnd) = currentMonthRangeMillis(zone)
-                                    coroutineScope.launch { BillingPeriodStore.savePeriod(context, mStart, mEnd) }
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("Este mes") }
-
-                            Button(
-                                onClick = { coroutineScope.launch { BillingPeriodStore.savePeriod(context, defaultPeriod.first, defaultPeriod.second) } },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("Reset") }
                         }
                     }
                 }
@@ -840,12 +797,6 @@ fun ActivityHomeScreen(
                 KpiLine("Horas imputadas periodo", formatHours(horasImputadasPeriodo), "solo cerrados")
                 KpiLine("Δ Horas (objetivo - imputadas)", formatHours(deltaHoras), "positivo = faltan horas")
 
-                SectionDivider()
-
-                BlockTitle("Anual + Tesorería")
-                KpiLine("Total anual (estimado)", formatCurrency(totalAnualEstimado), "desde 1 enero")
-                KpiLine("Pendiente de facturar", formatCurrency(pendienteFacturar), "todos no facturados")
-
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val axis = axisFolderUri()
@@ -856,13 +807,6 @@ fun ActivityHomeScreen(
                             Text("Pulsa abajo y elige en Drive tu carpeta AXIS.", color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
-                } else {
-                    val docId = runCatching { DocumentsContract.getTreeDocumentId(axis) }.getOrNull()
-                    Text(
-                        text = "📁 Carpeta AXIS: ${docId ?: "configurada"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
 
                 Button(
@@ -890,7 +834,6 @@ fun ActivityHomeScreen(
                 ) { Text("🛟 Restaurar desde backup (.json.gz)") }
             }
 
-            // DERECHA: TIMELINE
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -957,24 +900,8 @@ fun ActivityHomeScreen(
                             .sortedBy { it.startTimestamp }
 
                         if (stopCount == 0 && currentDay != day && travelsToday.isEmpty()) {
-                            Card(
-                                colors = CardDefaults.cardColors(
-                                    containerColor = when {
-                                        isHoliday || isWeekend -> MaterialTheme.colorScheme.errorContainer
-                                        isVacation -> MaterialTheme.colorScheme.tertiaryContainer
-                                        else -> MaterialTheme.colorScheme.surfaceVariant
-                                    }
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(Modifier.padding(12.dp)) {
-                                    val color = when {
-                                        isHoliday || isWeekend -> MaterialTheme.colorScheme.error
-                                        isVacation -> MaterialTheme.colorScheme.onTertiaryContainer
-                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                    Text("Sin viajes", color = color)
-                                }
+                            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(12.dp)) { Text("Sin viajes") }
                             }
                         } else {
                             travelsToday.forEach { tr ->
@@ -996,7 +923,6 @@ fun ActivityHomeScreen(
         }
     }
 }
-
 /* =========================
    Snapshot parse + Backup pruning
    ========================= */
@@ -1115,7 +1041,7 @@ private fun pruneOldBackups(context: Context, backupsDirUri: Uri, keep: Int) {
         }
     }
 
-    val sorted = entries.sortedByDescending { it.first } // YYYY_MM_DD => orden cronológico
+    val sorted = entries.sortedByDescending { it.first } // YYYY_MM_DD => cronológico
     val toDelete = if (sorted.size > keep) sorted.drop(keep) else emptyList()
 
     toDelete.forEach { (_, docId) ->
@@ -1167,10 +1093,7 @@ private fun TravelRowCard(
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDateOrToday(travel.startTimestamp, zone).format(dateFormatter)
 
-    Card(
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
