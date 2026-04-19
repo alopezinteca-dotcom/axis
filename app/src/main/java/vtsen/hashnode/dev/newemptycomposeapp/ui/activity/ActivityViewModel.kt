@@ -1,7 +1,4 @@
-package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
-
-import android.content.Context
-import android.net.Uri
+package vtsen.hashnode.dev.newemptycomposeapp.ui.activitypackage vtsen.hashnode.dev.newemptycomposeimport android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.LocalDate
@@ -86,9 +83,7 @@ class ActivityViewModel(
             )
 
     init {
-        viewModelScope.launch {
-            BillingPeriodStore.ensureInitialized(appContext, zone)
-        }
+        viewModelScope.launch { BillingPeriodStore.ensureInitialized(appContext, zone) }
     }
 
     fun setBillingPeriodDates(from: LocalDate, to: LocalDate) {
@@ -108,6 +103,10 @@ class ActivityViewModel(
         }
     }
 
+    /**
+     * Compat UI: antes setStopsRange mutaba un range interno.
+     * Ahora: escribe periodo en DataStore.
+     */
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
         setBillingPeriodMillis(fromMillis, toMillis)
     }
@@ -337,7 +336,7 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 6) BACKUP / RESTORE (se mantiene)
+    // 6) BACKUP / RESTORE (mantener)
     // =========================
 
     suspend fun buildSnapshotForBackup(): BackupSnapshot {
@@ -389,8 +388,9 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 7) EXPORT (modo carpeta) — se mantiene por compatibilidad
+    // 7) EXPORT (modo carpeta) — compat
     // =========================
+
     fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
         if (_isExporting.value) return
 
@@ -418,15 +418,9 @@ class ActivityViewModel(
     }
 
     // =========================
-    // ✅ 8) EXPORT (modo archivo maestro por URI) — NUEVO PRINCIPAL
+    // ✅ 8) EXPORT (modo archivo maestro por URI) — PRINCIPAL para la Tab A9+
     // =========================
-    /**
-     * Exporta el maestro fijo a un URI de archivo (CreateDocument/OpenDocument).
-     * Esto funciona aunque Drive no soporte seleccionar carpetas.
-     *
-     * - Sobrescribe el archivo (modo "wt")
-     * - Exporta TODO: allTravels + allStopsOnce()
-     */
+
     fun exportToMasterFileUri(masterFileUri: Uri) {
         if (_isExporting.value) return
 
@@ -451,9 +445,6 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * Backup manual a otro URI (por si añades botón "Crear backup ahora" con CreateDocument).
-     */
     fun exportBackupToFileUri(backupFileUri: Uri) {
         if (_isExporting.value) return
 
@@ -481,6 +472,7 @@ class ActivityViewModel(
     // =========================
     // 9) IMPORT desde Drive (CSV unificado)
     // =========================
+
     fun importFromDriveCsv(
         csvUri: Uri,
         strategy: AxisImportCoordinator.ImportStrategy = AxisImportCoordinator.ImportStrategy.REPLACE_ALL
@@ -531,3 +523,6 @@ class ActivityViewModel(
     private val _lastImportResult = MutableStateFlow<AxisImportCoordinator.ImportResult?>(null)
     val lastImportResult: StateFlow<AxisImportCoordinator.ImportResult?> = _lastImportResult.asStateFlow()
 }
+
+
+import android.content.Context
