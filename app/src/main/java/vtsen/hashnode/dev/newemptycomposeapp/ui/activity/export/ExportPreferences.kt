@@ -1,6 +1,10 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export
 
-import android.content {import android.content.Context
+import android.content.Context
+import android.net.Uri
+
+object ExportPreferences {
+
     private const val PREFS = "axis_export_prefs"
 
     // Carpeta AXIS en Drive (treeUri)
@@ -15,7 +19,7 @@ import android.content {import android.content.Context
     // (Compat) backup por fecha (yyyy_MM_dd)
     private const val KEY_LAST_BACKUP_DATE = "export_last_backup_date"
 
-    // ✅ Recomendado: backup por timestamp (millis) para calcular 7 días de forma robusta
+    // Recomendado: backup por timestamp (millis) para calcular 7 días de forma robusta
     private const val KEY_LAST_BACKUP_TIMESTAMP = "last_backup_timestamp"
 
     // ---------------- Folder Uri ----------------
@@ -30,6 +34,7 @@ import android.content {import android.content.Context
     fun getFolderUri(context: Context): Uri? {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_FOLDER_URI, null)
+        
         return s?.let { Uri.parse(it) }
     }
 
@@ -52,6 +57,7 @@ import android.content {import android.content.Context
     fun getDailyFileUri(context: Context): Uri? {
         val s = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_DAILY_FILE_URI, null)
+            
         return s?.let { Uri.parse(it) }
     }
 
@@ -90,7 +96,7 @@ import android.content {import android.content.Context
             .getString(KEY_LAST_BACKUP_DATE, null)
     }
 
-    // ---------------- ✅ Backup Timestamp (millis) ----------------
+    // ---------------- Backup Timestamp (millis) ----------------
 
     fun setLastBackupTimestamp(context: Context, timestampMillis: Long) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -104,4 +110,3 @@ import android.content {import android.content.Context
             .getLong(KEY_LAST_BACKUP_TIMESTAMP, 0L)
     }
 }
-import android.net.Uri
