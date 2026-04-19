@@ -10,7 +10,7 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 /**
  * AxisFileManager
  *
- * Única responsabilidad: operar con el ContentResolver + SAF (Google Drive incluido).
+ * Responsabilidad única: operar con el ContentResolver + SAF (incluye Drive si soporta TREE).
  * - Buscar un archivo por nombre dentro de una carpeta (treeUri)
  * - Crear archivo si no existe
  * - SOBRESCRIBIR si existe (sin borrar) para mantener ID estable en Drive
@@ -20,7 +20,7 @@ object AxisFileManager {
     private const val MIME_CSV = "text/csv"
 
     /**
-     * Exporta CSV unificado (travels + stops) a una carpeta SAF.
+     * Exporta CSV unificado (travels + stops) a una carpeta SAF (treeUri).
      * Drive-safe:
      * - Si existe el archivo -> sobrescribe (mantiene ID)
      * - Si no existe -> crea
