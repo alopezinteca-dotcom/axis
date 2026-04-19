@@ -1,14 +1,6 @@
 package vtsen.hashnode.dev.newemptycomposeapp.ui.activity
 
-import android.app.Activity
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
+importimport androidx.compose.foundation.layout.Columnimport android.app.Activity
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -69,12 +61,13 @@ import kotlin.math.abs
 import kotlinx.coroutines.launch
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.AxisImportCoordinator
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.export.ExportPreferences
+import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarManagementDialog
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Holiday
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.CalendarOverridesStore.Vacation
-import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.kpi.BillingPeriodStore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -108,8 +101,24 @@ fun ActivityHomeScreen(
     val isExporting by viewModel.isExporting.collectAsStateWithLifecycle(initialValue = false)
     val exportError by viewModel.exportError.collectAsStateWithLifecycle(initialValue = null)
 
+    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle(initialValue = false)
+    val importError by viewModel.importError.collectAsStateWithLifecycle(initialValue = null)
+    val lastImportResult by viewModel.lastImportResult.collectAsStateWithLifecycle(initialValue = null)
+
     LaunchedEffect(exportError) {
-        exportError?.let { snackbarHostState.showSnackbar("❌ $it") }
+        exportError?.let { snackbarHostState.showSnackbar("❌ Export: $it") }
+    }
+
+    LaunchedEffect(importError) {
+        importError?.let { snackbarHostState.showSnackbar("❌ Import: $it") }
+    }
+
+    LaunchedEffect(lastImportResult) {
+        lastImportResult?.let { r ->
+            snackbarHostState.showSnackbar(
+                "✅ Import OK: ${r.travelsImported} viajes, ${r.stopsImported} paradas (saltadas: ${r.stopsSkippedNoTravel})"
+            )
+        }
     }
 
     // =========================
@@ -160,7 +169,7 @@ fun ActivityHomeScreen(
     val fromMillis = remember(fromDate, zone) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
     val toMillis = remember(toDate, zone) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
 
-    // Compat: si tu VM usa setStopsRange (lo tiene) esto mantiene stops del periodo al día
+    // Compat: mantener stops del periodo al día en tu VM
     LaunchedEffect(fromMillis, toMillis) {
         if (fromMillis > 0L && toMillis > 0L) viewModel.setStopsRange(fromMillis, toMillis)
     }
@@ -199,7 +208,7 @@ fun ActivityHomeScreen(
         }
     }
 
-    val diasLaborablesReales by remember(fromDate, toDate, vacationDatesInPeriod) {
+    val diasLaborablesReales by remember(fromDate, toDate, vacationDatesInPeriod, holidaysInPeriod) {
         derivedStateOf {
             countWeekdaysInclusive(fromDate, toDate) -
                 countWeekdaysInSet(fromDate, toDate, holidaysInPeriod.map { it.date }.toSet()) -
@@ -239,7 +248,7 @@ fun ActivityHomeScreen(
     )
 
     // =========================
-    // Drive SAF folder picker (para exportar Maestro + Backup semanal)
+    // Export: Drive SAF folder picker
     // =========================
     val folderPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -249,11 +258,9 @@ fun ActivityHomeScreen(
 
         val flags = result.data?.flags ?: 0
         val takeFlags = flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-
         runCatching { context.contentResolver.takePersistableUriPermission(uri, takeFlags) }
-        ExportPreferences.saveFolderUri(context, uri)
 
-        // Llama al VM recomendado
+        ExportPreferences.saveFolderUri(context, uri)
         viewModel.exportMasterAndMaybeBackupToDrive(uri)
 
         coroutineScope.launch {
@@ -266,8 +273,6 @@ fun ActivityHomeScreen(
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
-
-        // Ayuda a mostrar Drive en algunos dispositivos
         try { intent.setPackage("com.android.documentsui") } catch (_: Exception) {}
 
         try {
@@ -279,6 +284,31 @@ fun ActivityHomeScreen(
             intent.setPackage(null)
             folderPickerLauncher.launch(intent)
         }
+    }
+
+    // =========================
+    // Import: Drive SAF file picker (CSV)
+    // =========================
+    val importCsvLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+
+        // Intentamos persistir permiso de lectura (puede fallar según proveedor)
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        viewModel.importFromDriveCsv(uri, AxisImportCoordinator.ImportStrategy.REPLACE_ALL)
+
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("⏳ Importando CSV…")
+        }
+    }
+
+    fun launchImportCsvPicker() {
+        // Algunos proveedores (Drive) no marcan bien mime; añadimos varios
+        importCsvLauncher.launch(arrayOf("text/csv", "text/*", "application/octet-stream"))
     }
 
     // =========================
@@ -317,7 +347,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Dialog: Calendar manager
+    // Dialogs: Calendar manager
     // =========================
     if (showCalendarManager) {
         CalendarManagementDialog(
@@ -605,7 +635,7 @@ fun ActivityHomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // LEFT KPIs
+            // LEFT KPIs + Export/Import
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -649,12 +679,13 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // EXPORT
                 Button(
                     onClick = {
                         val folder = ExportPreferences.getFolderUri(context)
                         if (folder == null) launchFolderPickerSaf() else viewModel.exportMasterAndMaybeBackupToDrive(folder)
                     },
-                    enabled = !isExporting,
+                    enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
                 ) {
                     if (isExporting) {
@@ -670,10 +701,37 @@ fun ActivityHomeScreen(
                 TextButton(onClick = { launchFolderPickerSaf() }, modifier = Modifier.fillMaxWidth()) {
                     Text("⚙️ Cambiar carpeta de exportación")
                 }
+
+                // IMPORT
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Button(
+                    onClick = { launchImportCsvPicker() },
+                    enabled = !isExporting && !isImporting,
+                    modifier = Modifier.fillMaxWidth().height(56.dp)
+                ) {
+                    if (isImporting) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            CircularProgressIndicator(strokeWidth = 2.dp)
+                            Text("IMPORTANDO…", fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        Text("📥 IMPORTAR CSV (DRIVE)", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Text(
+                    "⚠️ Importar (REEMPLAZA TODO): borra BD local y restaura desde el CSV.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             // RIGHT Timeline
-            Column(modifier = Modifier.weight(0.65f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier.weight(0.65f).fillMaxHeight(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Text("Timeline del periodo", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
 
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
@@ -964,3 +1022,10 @@ private fun DayHeader(
 private fun formatCurrency(value: Double): String = "${formatCurrencyNumber(value)} €"
 private fun formatCurrencyNumber(value: Double): String = String.format(Locale.getDefault(), "%.2f", value)
 private fun formatHours(value: Double): String = String.format(Locale.getDefault(), "%.1f h", value)
+import android.content.ActivityNotFoundException
+import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
