@@ -12,15 +12,13 @@ import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStopEntity
 /**
  * AxisBackupCoordinator
  *
- * "Cerebro" de la operación:
- * 1) Exporta SIEMPRE el archivo maestro fijo para Excel:
+ * Modo carpeta (treeUri) — compatibilidad:
+ * 1) Exporta SIEMPRE el archivo maestro fijo:
  *    AXIS_Master_Database.csv
  * 2) Cada 7 días (o si nunca se ha hecho), genera un backup fechado:
  *    AXIS_Backup_yyyy_MM_dd.csv
  *
- * Nota importante:
- * - El Maestro se escribe en modo Drive-safe (sin borrar; se sobrescribe para mantener ID estable).
- * - El backup también se escribe con el mismo FileManager. Como el nombre lleva fecha, normalmente no pisa nada.
+ * Nota: usa AxisFileManager (Drive-safe) para sobrescribir sin borrar (mantiene ID si aplica).
  */
 object AxisBackupCoordinator {
 
@@ -29,9 +27,6 @@ object AxisBackupCoordinator {
 
     private val backupDateFormat = SimpleDateFormat("yyyy_MM_dd", Locale.getDefault())
 
-    /**
-     * Exporta el Maestro (siempre) y opcionalmente un backup si han pasado 7 días.
-     */
     fun exportMasterAndMaybeBackup(
         context: Context,
         folderUri: Uri,
@@ -67,11 +62,6 @@ object AxisBackupCoordinator {
         }
     }
 
-    /**
-     * Decide si toca backup.
-     * - Si last == 0 -> nunca se ha hecho -> sí
-     * - Si han pasado >= 7 días -> sí
-     */
     private fun shouldCreateBackup(nowMillis: Long, lastBackupMillis: Long): Boolean {
         if (lastBackupMillis == 0L) return true
         val diffDays = TimeUnit.MILLISECONDS.toDays(nowMillis - lastBackupMillis)
