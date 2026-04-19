@@ -11,11 +11,11 @@ class TravelStopRepository(
     fun stopsInRange(fromMillis: Long, toMillis: Long): Flow<List<TravelStopEntity>> =
         dao.getStopsInRange(fromMillis, toMillis)
 
-    // Todas las paradas (flow)
+    // ✅ NUEVO: todas las paradas (flow)
     fun allStops(): Flow<List<TravelStopEntity>> =
         dao.getAllStops()
 
-    // Todas las paradas (snapshot) — imprescindible para export maestro/backup
+    // ✅ NUEVO: todas las paradas (snapshot) — imprescindible para export maestro
     suspend fun allStopsOnce(): List<TravelStopEntity> =
         dao.getAllStopsOnce()
 
@@ -25,7 +25,7 @@ class TravelStopRepository(
     suspend fun delete(id: String) =
         dao.delete(id)
 
-    // Restore
+    // ✅ Restore / REPLACE_ALL
     suspend fun deleteAll() =
         dao.deleteAllStops()
 
