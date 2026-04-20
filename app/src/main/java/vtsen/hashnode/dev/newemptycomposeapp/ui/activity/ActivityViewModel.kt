@@ -112,10 +112,6 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * Compat: UI antigua llamaba setStopsRange para cambiar rango.
-     * Ahora el rango vive en BillingPeriodStore.
-     */
     fun setStopsRange(fromMillis: Long, toMillis: Long) {
         setBillingPeriodMillis(fromMillis, toMillis)
     }
@@ -171,7 +167,7 @@ class ActivityViewModel(
             )
 
     // =========================
-    // 3) GESTIÓN DE PARADAS (EN CURSO)
+    // 3) PARADAS (EN CURSO)
     // =========================
 
     fun validateStopKm(kmOdometer: Int?): String? {
@@ -224,7 +220,7 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 4) GESTIÓN DE VIAJES
+    // 4) VIAJES
     // =========================
 
     fun startTravel(
@@ -236,6 +232,7 @@ class ActivityViewModel(
         hasDiet: Boolean
     ): Boolean {
         if (origin.isBlank() || destination.isBlank() || kmStart <= 0) return false
+        if (billingExpected < 0) return false
 
         viewModelScope.launch {
             repository.insertTravel(
@@ -284,6 +281,11 @@ class ActivityViewModel(
         return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
     }
 
+    /**
+     * ✅ FIX: permitir cerrar viajes NO FACTURABLES (billingExpected=0) con 0 horas.
+     * - Si billingExpected > 0 => horas deben ser > 0
+     * - Si billingExpected == 0 => horas pueden ser 0 (pero nunca negativas)
+     */
     fun closeCurrentTravelWithSnapshots(
         kmEnd: Int,
         hoursImputed: Double,
@@ -291,7 +293,21 @@ class ActivityViewModel(
         snaps: ParamSnapshots
     ): Boolean {
         val current = currentTravel.value ?: return false
-        if (kmEnd < current.kmStart || hoursImputed <= 0.0 || hoursCalculated <= 0.0) return false
+
+        // KM siempre debe ser coherente
+        if (kmEnd < current.kmStart) return false
+
+        val nonBillable = current.billingExpected == 0.0
+
+        if (!nonBillable) {
+            // Viaje facturable: horas deben ser > 0
+            if (hoursImputed <= 0.0) return false
+            if (hoursCalculated <= 0.0) return false
+        } else {
+            // ✅ Viaje NO facturable: permitir 0.0, pero no permitir negativos
+            if (hoursImputed < 0.0) return false
+            if (hoursCalculated < 0.0) return false
+        }
 
         val delta = hoursImputed - hoursCalculated
         val modified = abs(delta) > 0.01
@@ -387,9 +403,6 @@ class ActivityViewModel(
     fun clearExportError() { _exportError.value = null }
     fun clearImportError() { _importError.value = null }
 
-    /**
-     * MODO A (compat): export por carpeta (treeUri). En tu Tab puede no salir Drive.
-     */
     fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
         if (_isExporting.value) return
         viewModelScope.launch {
@@ -415,9 +428,6 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * ✅ MODO B (principal): export por archivo maestro (URI individual). Funciona con Drive en Samsung.
-     */
     fun exportToMasterFileUri(masterFileUri: Uri) {
         if (_isExporting.value) return
         viewModelScope.launch {
@@ -441,9 +451,6 @@ class ActivityViewModel(
         }
     }
 
-    /**
-     * Import CSV unificado desde Drive/SAF.
-     */
     fun importFromDriveCsv(
         csvUri: Uri,
         strategy: AxisImportCoordinator.ImportStrategy = AxisImportCoordinator.ImportStrategy.REPLACE_ALL
