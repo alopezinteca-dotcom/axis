@@ -207,15 +207,20 @@ fun ActivityHomeScreen(
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
 
-    val fromPickerState = remember(fromDate) {
-        rememberDatePickerState(
-            initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
-        )
+    // ✅ CORRECTO: rememberDatePickerState NO va dentro de remember { }
+    val fromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+    )
+    val toPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+    )
+
+    // Mantener sincronizados los DatePickers cuando cambien las fechas
+    LaunchedEffect(fromDate) {
+        fromPickerState.selectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
     }
-    val toPickerState = remember(toDate) {
-        rememberDatePickerState(
-            initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
-        )
+    LaunchedEffect(toDate) {
+        toPickerState.selectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
     }
 
     if (showFromPicker) {
@@ -267,7 +272,6 @@ fun ActivityHomeScreen(
     var holidayDesc by rememberSaveable { mutableStateOf("") }
     var vacationDesc by rememberSaveable { mutableStateOf("") }
 
-    // ✅ Picker states que faltaban (esto arregla tus "Unresolved reference")
     val holidayPickerState = rememberDatePickerState(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
     )
@@ -281,8 +285,12 @@ fun ActivityHomeScreen(
     val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
         derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
     }
-    val holidayDatesInPeriod by remember(holidaysInPeriod) { derivedStateOf { holidaysInPeriod.map { it.date }.toSet() } }
-    val holidayByDateInPeriod by remember(holidaysInPeriod) { derivedStateOf { holidaysInPeriod.associateBy { it.date } } }
+    val holidayDatesInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
+    }
+    val holidayByDateInPeriod by remember(holidaysInPeriod) {
+        derivedStateOf { holidaysInPeriod.associateBy { it.date } }
+    }
 
     val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { allVacations.filter { v -> !(v.to.isBefore(fromDate) || v.from.isAfter(toDate)) } }
@@ -312,6 +320,7 @@ fun ActivityHomeScreen(
         )
     }
 
+    // Dialog añadir festivo (con foco/teclado)
     if (showAddHoliday) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -320,7 +329,10 @@ fun ActivityHomeScreen(
             onDismissRequest = { showAddHoliday = false },
             title = { Text("Añadir festivo", fontWeight = FontWeight.Bold) },
             text = {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
                         value = holidayDesc,
                         onValueChange = { holidayDesc = it },
@@ -355,6 +367,7 @@ fun ActivityHomeScreen(
         }
     }
 
+    // Dialog añadir vacaciones (con foco/teclado)
     if (showAddVacation) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -363,7 +376,10 @@ fun ActivityHomeScreen(
             onDismissRequest = { showAddVacation = false },
             title = { Text("Añadir vacaciones", fontWeight = FontWeight.Bold) },
             text = {
-                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     OutlinedTextField(
                         value = vacationDesc,
                         onValueChange = { vacationDesc = it },
@@ -404,22 +420,32 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // PeriodTravels (ESTO FALTABA → arregla cascada de errores)
+    // PeriodTravels + Timeline helpers
     // =========================
     val fromMillis = remember(fromDate) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
     val toMillis = remember(toDate) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
-
-    // Mantener stops del periodo (compat)
-    LaunchedEffect(fromMillis, toMillis) {
-        if (fromMillis > 0L && toMillis > 0L) viewModel.setStopsRange(fromMillis, toMillis)
-    }
 
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in fromMillis..toMillis } }
     }
 
+    val daysInRange by remember(fromDate, toDate) {
+        derivedStateOf { datesBetweenInclusive(fromDate, toDate) }
+    }
+
+    val travelsByDay by remember(periodTravels, zone) {
+        derivedStateOf { periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone) } }
+    }
+
+    val stopsCountByDay by remember(stopsInPeriod, zone) {
+        derivedStateOf {
+            stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDateOrToday(s.timestamp, zone) }
+                .mapValues { it.value.size }
+        }
+    }
+
     // =========================
-    // KPIs (según tu lista)
+    // KPIs 1-9
     // =========================
     val diasLaborablesPeriodo by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
         derivedStateOf {
@@ -442,12 +468,18 @@ fun ActivityHomeScreen(
     val facturadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { it.isInvoiced }.sumOf { it.billingExpected } }
     }
+
     val horasCerradasPeriodo by remember(periodTravels) {
-        derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
+        derivedStateOf {
+            periodTravels.filter { it.status == TravelStatus.CLOSED }
+                .sumOf { it.hoursImputed ?: 0.0 }
+        }
     }
+
     val totalEstimadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.sumOf { it.billingExpected } }
     }
+
     val pendienteEstimadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
@@ -455,6 +487,7 @@ fun ActivityHomeScreen(
     val pendienteCartera by remember(allTravels) {
         derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
+
     val horasCartera by remember(allTravels) {
         derivedStateOf {
             allTravels.filter { !it.isInvoiced }.sumOf { t ->
@@ -476,22 +509,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // Timeline helpers
-    // =========================
-    val daysInRange by remember(fromDate, toDate) { derivedStateOf { datesBetweenInclusive(fromDate, toDate) } }
-
-    val travelsByDay by remember(periodTravels, zone) {
-        derivedStateOf { periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone) } }
-    }
-    val stopsCountByDay by remember(stopsInPeriod, zone) {
-        derivedStateOf {
-            stopsInPeriod.groupBy { s -> BillingPeriodStore.millisToLocalDateOrToday(s.timestamp, zone) }
-                .mapValues { it.value.size }
-        }
-    }
-
-    // =========================
-    // UI (Scaffold)
+    // UI
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -516,7 +534,10 @@ fun ActivityHomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // IZQUIERDA KPIs
+
+            // =========================
+            // IZQUIERDA: KPIs + Export/Import
+            // =========================
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -524,11 +545,18 @@ fun ActivityHomeScreen(
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
                 BlockTitle("Periodo (Desde / Hasta)")
-                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) { Text("Desde: ${fromDate.format(dateFormatter)}") }
-                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) { Text("Hasta: ${toDate.format(dateFormatter)}") }
+                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) {
+                                Text("Desde: ${fromDate.format(dateFormatter)}")
+                            }
+                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) {
+                                Text("Hasta: ${toDate.format(dateFormatter)}")
+                            }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(onClick = { viewModel.resetBillingToThisMonth() }, modifier = Modifier.weight(1f)) { Text("Este mes") }
@@ -627,7 +655,9 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // DERECHA TIMELINE
+            // =========================
+            // DERECHA: Timeline por días
+            // =========================
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -639,8 +669,7 @@ fun ActivityHomeScreen(
                         val isWeekend = day.isWeekend()
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
-
-                        val vacationDescs: List<String> = vacationDescsByDateInPeriod[day].orEmpty()
+                        val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
                         DayHeader(day, dateFormatter, localeEs, isWeekend, isHoliday, isVacation)
@@ -657,10 +686,9 @@ fun ActivityHomeScreen(
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🏖️ VACACIONES", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                    vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-                                        .forEach { s: String ->
-                                            Text(s, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                        }
+                                    vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct().forEach { s ->
+                                        Text(s, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                    }
                                 }
                             }
                         }
@@ -674,6 +702,7 @@ fun ActivityHomeScreen(
                             }
                         }
 
+                        // Viaje en curso
                         val current = currentTravel
                         val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDateOrToday(it, zone) }
                         if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
@@ -690,8 +719,10 @@ fun ActivityHomeScreen(
                             }
                         }
 
-                        val travelsToday: List<TravelEntity> =
-                            (travelsByDay[day] ?: emptyList()).filter { it.status == TravelStatus.CLOSED }.sortedBy { it.startTimestamp }
+                        val travelsToday =
+                            (travelsByDay[day] ?: emptyList())
+                                .filter { it.status == TravelStatus.CLOSED }
+                                .sortedBy { it.startTimestamp }
 
                         if (stopCount == 0 && currentDay != day && travelsToday.isEmpty()) {
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
@@ -706,8 +737,7 @@ fun ActivityHomeScreen(
                                     zone = zone,
                                     dateFormatter = dateFormatter,
                                     onToggleInvoiced = { checked -> viewModel.setFacturado(tr.id, checked) },
-                                    onEdit = { /* reusa onEditTravelClick si quieres */ onEditTravelClick(tr.id) },
-                                    onDelete = { /* si quieres borrar desde aquí, implementa diálogo */ }
+                                    onEdit = { onEditTravelClick(tr.id) }
                                 )
                             }
                         }
@@ -781,7 +811,7 @@ private fun KpiRatioNoColor(title: String, numerator: Double, denominator: Doubl
 }
 
 /* =========================
-   Timeline card (facturado toggle incluido)
+   Timeline travel card
    ========================= */
 
 @Composable
@@ -790,15 +820,16 @@ private fun TravelRowCard(
     zone: ZoneId,
     dateFormatter: DateTimeFormatter,
     onToggleInvoiced: (Boolean) -> Unit,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onEdit: () -> Unit
 ) {
-    val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDateOrToday(travel.startTimestamp, zone).format(dateFormatter)
 
-    Card(elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth().clickable { onEdit() }) {
+    Card(
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth().clickable { onEdit() }
+    ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
+            Text("$date · ${travel.origin} → ${travel.destination}", fontWeight = FontWeight.SemiBold)
             if (travel.description.isNotBlank()) {
                 Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
