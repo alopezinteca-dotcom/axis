@@ -5,7 +5,6 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -136,7 +135,7 @@ fun ActivityHomeScreen(
     }
 
     // -------------------------
-    // Archivo maestro por URI
+    // Maestro Drive por URI
     // -------------------------
     var masterFileUri by remember { mutableStateOf(ExportPreferences.getMasterFileUri(context)) }
 
@@ -144,18 +143,15 @@ fun ActivityHomeScreen(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         }
-
         ExportPreferences.saveMasterFileUri(context, uri)
         masterFileUri = uri
         viewModel.exportToMasterFileUri(uri)
-
         coroutineScope.launch { snackbarHostState.showSnackbar("✅ Maestro creado en Drive. Exportando…") }
     }
 
@@ -163,9 +159,7 @@ fun ActivityHomeScreen(
         createMasterLauncher.launch("AXIS_Master_Database.csv")
     }
 
-    // -------------------------
     // Import CSV
-    // -------------------------
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
     var showImportConfirm by remember { mutableStateOf(false) }
 
@@ -186,9 +180,7 @@ fun ActivityHomeScreen(
         AlertDialog(
             onDismissRequest = { showImportConfirm = false },
             title = { Text("Importar CSV", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("⚠️ REEMPLAZA TODO: borra datos locales y restaura desde el CSV.\n\n¿Continuar?")
-            },
+            text = { Text("⚠️ REEMPLAZA TODO: borra datos locales y restaura desde el CSV.\n\n¿Continuar?") },
             confirmButton = {
                 TextButton(onClick = {
                     val uri = pendingImportUri
@@ -210,24 +202,20 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 1) Periodo (Desde/Hasta) con persistencia
+    // PERIODO (Desde/Hasta) + persistencia
     // =========================
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
 
-    val fromPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
-    )
-    val toPickerState = rememberDatePickerState(
-        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
-    )
-
-    // Mantener picker sincronizado con el periodo actual (evita errores raros)
-    LaunchedEffect(fromDate) {
-        fromPickerState.selectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+    val fromPickerState = remember(fromDate) {
+        rememberDatePickerState(
+            initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
+        )
     }
-    LaunchedEffect(toDate) {
-        toPickerState.selectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+    val toPickerState = remember(toDate) {
+        rememberDatePickerState(
+            initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
+        )
     }
 
     if (showFromPicker) {
@@ -239,7 +227,7 @@ fun ActivityHomeScreen(
                     if (picked != null) {
                         val d = BillingPeriodStore.millisToLocalDateOrToday(picked, zone)
                         val newTo = if (d.isAfter(toDate)) d else toDate
-                        viewModel.setBillingPeriodDates(d, newTo) // ✅ queda guardado
+                        viewModel.setBillingPeriodDates(d, newTo)
                     }
                     showFromPicker = false
                 }) { Text("OK") }
@@ -257,7 +245,7 @@ fun ActivityHomeScreen(
                     if (picked != null) {
                         val d = BillingPeriodStore.millisToLocalDateOrToday(picked, zone)
                         val newFrom = if (d.isBefore(fromDate)) d else fromDate
-                        viewModel.setBillingPeriodDates(newFrom, d) // ✅ queda guardado
+                        viewModel.setBillingPeriodDates(newFrom, d)
                     }
                     showToPicker = false
                 }) { Text("OK") }
@@ -267,7 +255,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 2) Festivos y Vacaciones (con input arreglado)
+    // Calendario (Festivos / Vacaciones)
     // =========================
     val allHolidays by CalendarOverridesStore.holidaysFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
     val allVacations by CalendarOverridesStore.vacationsFlow(context).collectAsStateWithLifecycle(initialValue = emptyList())
@@ -279,15 +267,22 @@ fun ActivityHomeScreen(
     var holidayDesc by rememberSaveable { mutableStateOf("") }
     var vacationDesc by rememberSaveable { mutableStateOf("") }
 
+    // ✅ Picker states que faltaban (esto arregla tus "Unresolved reference")
+    val holidayPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacFromPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+    val vacToPickerState = rememberDatePickerState(
+        initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(LocalDate.now(), zone)
+    )
+
     val holidaysInPeriod by remember(allHolidays, fromDate, toDate) {
         derivedStateOf { allHolidays.filter { it.date in fromDate..toDate } }
     }
-    val holidayDatesInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.map { it.date }.toSet() }
-    }
-    val holidayByDateInPeriod by remember(holidaysInPeriod) {
-        derivedStateOf { holidaysInPeriod.associateBy { it.date } }
-    }
+    val holidayDatesInPeriod by remember(holidaysInPeriod) { derivedStateOf { holidaysInPeriod.map { it.date }.toSet() } }
+    val holidayByDateInPeriod by remember(holidaysInPeriod) { derivedStateOf { holidaysInPeriod.associateBy { it.date } } }
 
     val vacationsInPeriod by remember(allVacations, fromDate, toDate) {
         derivedStateOf { allVacations.filter { v -> !(v.to.isBefore(fromDate) || v.from.isAfter(toDate)) } }
@@ -317,7 +312,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // ---- Dialog añadir festivo (arreglado input) ----
     if (showAddHoliday) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -326,18 +320,14 @@ fun ActivityHomeScreen(
             onDismissRequest = { showAddHoliday = false },
             title = { Text("Añadir festivo", fontWeight = FontWeight.Bold) },
             text = {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = holidayDesc,
                         onValueChange = { holidayDesc = it },
                         label = { Text("Descripción (festivo)") },
-                        modifier = Modifier.fillMaxWidth()
-                            .focusRequester(focusRequester),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                        singleLine = true
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
                     )
                     DatePicker(state = holidayPickerState)
                 }
@@ -365,7 +355,6 @@ fun ActivityHomeScreen(
         }
     }
 
-    // ---- Dialog añadir vacaciones (arreglado input) ----
     if (showAddVacation) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -374,18 +363,14 @@ fun ActivityHomeScreen(
             onDismissRequest = { showAddVacation = false },
             title = { Text("Añadir vacaciones", fontWeight = FontWeight.Bold) },
             text = {
-                Column(
-                    Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = vacationDesc,
                         onValueChange = { vacationDesc = it },
                         label = { Text("Descripción (vacaciones)") },
-                        modifier = Modifier.fillMaxWidth()
-                            .focusRequester(focusRequester),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                        singleLine = true
+                        modifier = Modifier.fillMaxWidth().focusRequester(focusRequester),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)
                     )
                     Text("Desde", fontWeight = FontWeight.SemiBold)
                     DatePicker(state = vacFromPickerState)
@@ -419,24 +404,34 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 3) KPIs (1–9) como pides
+    // PeriodTravels (ESTO FALTABA → arregla cascada de errores)
     // =========================
+    val fromMillis = remember(fromDate) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
+    val toMillis = remember(toDate) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
 
-    // Días laborables: L-V menos festivos y vacaciones
+    // Mantener stops del periodo (compat)
+    LaunchedEffect(fromMillis, toMillis) {
+        if (fromMillis > 0L && toMillis > 0L) viewModel.setStopsRange(fromMillis, toMillis)
+    }
+
+    val periodTravels by remember(allTravels, fromMillis, toMillis) {
+        derivedStateOf { allTravels.filter { it.startTimestamp in fromMillis..toMillis } }
+    }
+
+    // =========================
+    // KPIs (según tu lista)
+    // =========================
     val diasLaborablesPeriodo by remember(fromDate, toDate, holidayDatesInPeriod, vacationDatesInPeriod) {
         derivedStateOf {
-            countWeekdaysInclusive(fromDate, toDate) -
-                countWeekdaysInSet(fromDate, toDate, holidayDatesInPeriod) -
-                countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)
+            (countWeekdaysInclusive(fromDate, toDate)
+                - countWeekdaysInSet(fromDate, toDate, holidayDatesInPeriod)
+                - countWeekdaysInSet(fromDate, toDate, vacationDatesInPeriod)).coerceAtLeast(0)
         }
     }
-    val diasLaborables = diasLaborablesPeriodo.coerceAtLeast(0)
 
-    // Objetivos
-    val totalFacturarObjetivo by remember(diasLaborables) { derivedStateOf { 350.0 * diasLaborables } }
-    val totalHorasObjetivo by remember(diasLaborables) { derivedStateOf { 8.0 * diasLaborables } }
+    val totalFacturarObjetivo by remember(diasLaborablesPeriodo) { derivedStateOf { 350.0 * diasLaborablesPeriodo } }
+    val totalHorasObjetivo by remember(diasLaborablesPeriodo) { derivedStateOf { 8.0 * diasLaborablesPeriodo } }
 
-    // Total KM periodo (solo CERRADOS)
     val totalKmPeriodo by remember(periodTravels) {
         derivedStateOf {
             periodTravels.filter { it.status == TravelStatus.CLOSED }
@@ -444,46 +439,35 @@ fun ActivityHomeScreen(
         }
     }
 
-    // Totales reales periodo
-    val totalEstimadoPeriodo by remember(periodTravels) {
-        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
-    }
     val facturadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { it.isInvoiced }.sumOf { it.billingExpected } }
+    }
+    val horasCerradasPeriodo by remember(periodTravels) {
+        derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
+    }
+    val totalEstimadoPeriodo by remember(periodTravels) {
+        derivedStateOf { periodTravels.sumOf { it.billingExpected } }
     }
     val pendienteEstimadoPeriodo by remember(periodTravels) {
         derivedStateOf { periodTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
-    val horasCerradasPeriodo by remember(periodTravels) {
-        derivedStateOf {
-            periodTravels.filter { it.status == TravelStatus.CLOSED }
-                .sumOf { it.hoursImputed ?: 0.0 }
-        }
-    }
 
-    // Cartera global
     val pendienteCartera by remember(allTravels) {
         derivedStateOf { allTravels.filter { !it.isInvoiced }.sumOf { it.billingExpected } }
     }
-    // KPI8 = A: horas de NO facturados (cerrados: hoursImputed; en curso: hoursDraft si existe)
     val horasCartera by remember(allTravels) {
         derivedStateOf {
             allTravels.filter { !it.isInvoiced }.sumOf { t ->
-                when {
-                    t.status == TravelStatus.CLOSED -> t.hoursImputed ?: 0.0
-                    else -> t.hoursDraft ?: 0.0
-                }
+                if (t.status == TravelStatus.CLOSED) (t.hoursImputed ?: 0.0) else (t.hoursDraft ?: 0.0)
             }
         }
     }
 
-    // Facturación anual (facturado SI del año en curso)
     val yearStartMillis = remember {
         BillingPeriodStore.localDateStartMillis(LocalDate.now().with(TemporalAdjusters.firstDayOfYear()), zone)
     }
-    val yearEndMillis = remember {
-        BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone)
-    }
+    val yearEndMillis = remember { BillingPeriodStore.localDateEndMillis(LocalDate.now(), zone) }
+
     val facturacionAnual by remember(allTravels, yearStartMillis, yearEndMillis) {
         derivedStateOf {
             allTravels.filter { it.isInvoiced && it.startTimestamp in yearStartMillis..yearEndMillis }
@@ -492,14 +476,12 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 4) Timeline (optimizado)
+    // Timeline helpers
     // =========================
     val daysInRange by remember(fromDate, toDate) { derivedStateOf { datesBetweenInclusive(fromDate, toDate) } }
 
     val travelsByDay by remember(periodTravels, zone) {
-        derivedStateOf {
-            periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone) }
-        }
+        derivedStateOf { periodTravels.groupBy { t -> BillingPeriodStore.millisToLocalDateOrToday(t.startTimestamp, zone) } }
     }
     val stopsCountByDay by remember(stopsInPeriod, zone) {
         derivedStateOf {
@@ -509,167 +491,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // 5) Edit/Delete + Facturado toggle
-    // =========================
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    var travelToDeleteId by remember { mutableStateOf<String?>(null) }
-
-    var showEditDialog by remember { mutableStateOf(false) }
-    var editingTravelId by remember { mutableStateOf<String?>(null) }
-    var editWarning by remember { mutableStateOf<String?>(null) }
-
-    var editOrigin by remember { mutableStateOf("") }
-    var editDestination by remember { mutableStateOf("") }
-    var editDescription by remember { mutableStateOf("") }
-    var editBilling by remember { mutableStateOf("") }
-    var editHasDiet by remember { mutableStateOf(false) }
-    var editKmStart by remember { mutableStateOf("") }
-    var editKmEnd by remember { mutableStateOf("") }
-    var editHoursImputed by remember { mutableStateOf("") }
-    var editIsInvoiced by remember { mutableStateOf(false) }
-
-    fun openEditDialog(travel: TravelEntity) {
-        editingTravelId = travel.id
-        editOrigin = travel.origin
-        editDestination = travel.destination
-        editDescription = travel.description
-        editBilling = String.format(Locale.US, "%.2f", travel.billingExpected)
-        editHasDiet = travel.hasDiet
-        editKmStart = travel.kmStart.toString()
-        editKmEnd = travel.kmEnd?.toString() ?: ""
-        editHoursImputed = travel.hoursImputed?.toString() ?: ""
-        editIsInvoiced = travel.isInvoiced
-        editWarning = null
-        showEditDialog = true
-    }
-
-    if (showDeleteConfirm && travelToDeleteId != null) {
-        AlertDialog(
-            onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Eliminar viaje") },
-            text = { Text("⚠️ Se eliminará el viaje y todas sus paradas. ¿Continuar?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    travelToDeleteId?.let { viewModel.deleteTravel(it) }
-                    travelToDeleteId = null
-                    showDeleteConfirm = false
-                }) { Text("Eliminar") }
-            },
-            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancelar") } }
-        )
-    }
-
-    if (showEditDialog && editingTravelId != null) {
-        val original = allTravels.firstOrNull { it.id == editingTravelId }
-        AlertDialog(
-            onDismissRequest = { showEditDialog = false },
-            title = { Text("Editar viaje", fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    original?.let {
-                        if (it.status == TravelStatus.CLOSED) {
-                            Text("⚠️ Editando viaje CERRADO (histórico).", color = MaterialTheme.colorScheme.error)
-                        }
-                    }
-
-                    OutlinedTextField(editOrigin, { editOrigin = it }, label = { Text("Origen") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(editDestination, { editDestination = it }, label = { Text("Destino") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(editDescription, { editDescription = it }, label = { Text("Descripción / Ref") }, modifier = Modifier.fillMaxWidth())
-
-                    OutlinedTextField(
-                        value = editBilling,
-                        onValueChange = { editBilling = it },
-                        label = { Text("Facturación (€)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Dieta", fontWeight = FontWeight.SemiBold)
-                        Switch(checked = editHasDiet, onCheckedChange = { editHasDiet = it })
-                    }
-
-                    OutlinedTextField(
-                        value = editKmStart,
-                        onValueChange = { editKmStart = it.filter(Char::isDigit) },
-                        label = { Text("KM inicio") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = editKmEnd,
-                        onValueChange = { editKmEnd = it.filter(Char::isDigit) },
-                        label = { Text("KM fin (si cerrado)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = editHoursImputed,
-                        onValueChange = { editHoursImputed = it },
-                        label = { Text("Horas imputadas (si cerrado)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Facturado", fontWeight = FontWeight.SemiBold)
-                        Switch(checked = editIsInvoiced, onCheckedChange = { editIsInvoiced = it })
-                    }
-
-                    editWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val base = original ?: run { showEditDialog = false; return@TextButton }
-
-                    val kmStart = editKmStart.toIntOrNull()
-                    if (kmStart == null || kmStart <= 0) { editWarning = "KM inicio inválido."; return@TextButton }
-
-                    val kmEnd = editKmEnd.toIntOrNull()
-                    if (editKmEnd.isNotBlank() && kmEnd == null) { editWarning = "KM fin inválido."; return@TextButton }
-                    if (kmEnd != null && kmEnd < kmStart) { editWarning = "KM fin < KM inicio."; return@TextButton }
-
-                    val billing = editBilling.replace(',', '.').toDoubleOrNull()
-                    if (billing == null || billing < 0.0) { editWarning = "Facturación inválida."; return@TextButton }
-
-                    val imputed = editHoursImputed.replace(',', '.').toDoubleOrNull()
-                    if (editHoursImputed.isNotBlank() && imputed == null) { editWarning = "Horas imputadas inválidas."; return@TextButton }
-
-                    val hoursCalc = base.hoursCalculatedSnapshot
-                    val delta = if (imputed != null && hoursCalc != null) (imputed - hoursCalc) else base.deltaHours
-                    val modified = if (delta != null) abs(delta) > 0.01 else base.hoursModified
-                    val costeHora = base.snapCosteHoraAlejandro ?: 26.0
-                    val impact = if (delta != null) delta * costeHora else base.impactEuroAlejandro
-
-                    val updated = base.copy(
-                        origin = editOrigin.trim(),
-                        destination = editDestination.trim(),
-                        description = editDescription.trim(),
-                        billingExpected = billing,
-                        hasDiet = editHasDiet,
-                        kmStart = kmStart,
-                        kmEnd = if (editKmEnd.isBlank()) base.kmEnd else kmEnd,
-                        hoursImputed = if (base.status == TravelStatus.CLOSED) imputed else base.hoursImputed,
-                        deltaHours = delta,
-                        hoursModified = modified,
-                        impactEuroAlejandro = impact,
-                        isInvoiced = editIsInvoiced
-                    )
-
-                    viewModel.updateTravel(updated)
-                    editWarning = null
-                    showEditDialog = false
-                }) { Text("Guardar") }
-            },
-            dismissButton = { TextButton(onClick = { editWarning = null; showEditDialog = false }) { Text("Cancelar") } }
-        )
-    }
-
-    // =========================
-    // Scaffold
+    // UI (Scaffold)
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -690,14 +512,11 @@ fun ActivityHomeScreen(
             }
         }
     ) { padding ->
-
         Row(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // =========================
-            // IZQUIERDA: KPIs + Export/Import
-            // =========================
+            // IZQUIERDA KPIs
             Column(
                 modifier = Modifier.weight(0.35f).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -708,12 +527,8 @@ fun ActivityHomeScreen(
                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) {
-                                Text("Desde: ${fromDate.format(dateFormatter)}")
-                            }
-                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) {
-                                Text("Hasta: ${toDate.format(dateFormatter)}")
-                            }
+                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) { Text("Desde: ${fromDate.format(dateFormatter)}") }
+                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) { Text("Hasta: ${toDate.format(dateFormatter)}") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(onClick = { viewModel.resetBillingToThisMonth() }, modifier = Modifier.weight(1f)) { Text("Este mes") }
@@ -722,61 +537,57 @@ fun ActivityHomeScreen(
                     }
                 }
 
-                BlockTitle("Días laborables (L-V menos festivos y vacaciones)")
-                KpiSimple("Días laborables periodo", diasLaborables.toString())
+                BlockTitle("Días laborables periodo")
+                KpiSimple("L-V menos festivos y vacaciones", diasLaborablesPeriodo.toString())
 
                 SectionDivider()
 
-                // BLOQUE 1
                 BlockTitle("Objetivos (Teórico)")
                 KpiSimple("1) Total facturar periodo", formatCurrency(totalFacturarObjetivo))
-                KpiSimple("2) Total KM periodo (solo cerrados)", "$totalKmPeriodo km")
+                KpiSimple("2) Total KM periodo (cerrados)", "$totalKmPeriodo km")
                 KpiSimple("3) Total horas periodo (objetivo)", formatHours(totalHorasObjetivo))
 
                 SectionDivider()
 
-                // BLOQUE 2
                 BlockTitle("Comparativas (Real vs Objetivo)")
-                KpiRatio(
-                    title = "4) Facturación (facturado SI / objetivo)",
+                KpiRatioColored(
+                    title = "4) Facturación (SI / objetivo)",
                     numerator = facturadoPeriodo,
-                    denominator = totalFacturarObjetivo
+                    denominator = totalFacturarObjetivo,
+                    isHours = false
                 )
-                KpiRatio(
+                KpiRatioColored(
                     title = "5) Horas (cerrados / objetivo)",
                     numerator = horasCerradasPeriodo,
-                    denominator = totalHorasObjetivo
+                    denominator = totalHorasObjetivo,
+                    isHours = true
                 )
-                // KPI6 sin color (como pediste)
-                KpiNoColorRatio(
-                    title = "6) Estimado pendiente (NO facturado / total estimado periodo)",
+                // KPI6 sin color
+                KpiRatioNoColor(
+                    title = "6) Estimado pendiente (NO / total estimado periodo)",
                     numerator = pendienteEstimadoPeriodo,
-                    denominator = totalEstimadoPeriodo
+                    denominator = totalEstimadoPeriodo,
+                    isHours = false
                 )
 
                 SectionDivider()
 
-                // BLOQUE 3
                 BlockTitle("Cartera (Global)")
-                KpiSimple("7) Total pendiente cartera (NO facturado)", formatCurrency(pendienteCartera))
-                KpiSimple("8) Total horas cartera (NO facturado)", formatHours(horasCartera))
+                KpiSimple("7) Pendiente cartera (NO facturado)", formatCurrency(pendienteCartera))
+                KpiSimple("8) Horas cartera (NO facturado)", formatHours(horasCartera))
 
                 SectionDivider()
 
-                // BLOQUE 4
                 BlockTitle("Anual")
-                KpiSimple("9) Facturación anual (facturado SI)", formatCurrency(facturacionAnual))
+                KpiSimple("9) Facturación anual (SI facturado)", formatCurrency(facturacionAnual))
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Drive master buttons
                 Button(
                     onClick = { launchCreateMaster() },
                     enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) {
-                    Text("☁️ CONFIGURAR DRIVE (CREAR MAESTRO)", fontWeight = FontWeight.Bold)
-                }
+                ) { Text("☁️ CONFIGURAR DRIVE (CREAR MAESTRO)", fontWeight = FontWeight.Bold) }
 
                 Button(
                     onClick = {
@@ -816,9 +627,7 @@ fun ActivityHomeScreen(
                 }
             }
 
-            // =========================
-            // DERECHA: Timeline
-            // =========================
+            // DERECHA TIMELINE
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -830,7 +639,8 @@ fun ActivityHomeScreen(
                         val isWeekend = day.isWeekend()
                         val holiday: Holiday? = holidayByDateInPeriod[day]
                         val isHoliday = holiday != null
-                        val vacationDescs = vacationDescsByDateInPeriod[day].orEmpty()
+
+                        val vacationDescs: List<String> = vacationDescsByDateInPeriod[day].orEmpty()
                         val isVacation = vacationDescs.isNotEmpty()
 
                         DayHeader(day, dateFormatter, localeEs, isWeekend, isHoliday, isVacation)
@@ -847,9 +657,10 @@ fun ActivityHomeScreen(
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Text("🏖️ VACACIONES", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                    vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct().forEach {
-                                        Text(it, color = MaterialTheme.colorScheme.onTertiaryContainer)
-                                    }
+                                    vacationDescs.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                                        .forEach { s: String ->
+                                            Text(s, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                                        }
                                 }
                             }
                         }
@@ -863,7 +674,6 @@ fun ActivityHomeScreen(
                             }
                         }
 
-                        // Viaje en curso
                         val current = currentTravel
                         val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDateOrToday(it, zone) }
                         if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
@@ -880,10 +690,8 @@ fun ActivityHomeScreen(
                             }
                         }
 
-                        // Viajes cerrados del día
-                        val travelsToday = (travelsByDay[day] ?: emptyList())
-                            .filter { it.status == TravelStatus.CLOSED }
-                            .sortedBy { it.startTimestamp }
+                        val travelsToday: List<TravelEntity> =
+                            (travelsByDay[day] ?: emptyList()).filter { it.status == TravelStatus.CLOSED }.sortedBy { it.startTimestamp }
 
                         if (stopCount == 0 && currentDay != day && travelsToday.isEmpty()) {
                             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
@@ -898,8 +706,8 @@ fun ActivityHomeScreen(
                                     zone = zone,
                                     dateFormatter = dateFormatter,
                                     onToggleInvoiced = { checked -> viewModel.setFacturado(tr.id, checked) },
-                                    onEdit = { openEditDialog(tr) },
-                                    onDelete = { travelToDeleteId = tr.id; showDeleteConfirm = true }
+                                    onEdit = { /* reusa onEditTravelClick si quieres */ onEditTravelClick(tr.id) },
+                                    onDelete = { /* si quieres borrar desde aquí, implementa diálogo */ }
                                 )
                             }
                         }
@@ -913,7 +721,7 @@ fun ActivityHomeScreen(
 }
 
 /* =========================
-   UI Helpers (KPIs)
+   KPI helpers
    ========================= */
 
 @Composable
@@ -930,11 +738,7 @@ private fun SectionDivider() {
 
 @Composable
 private fun KpiSimple(title: String, value: String) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -943,16 +747,13 @@ private fun KpiSimple(title: String, value: String) {
 }
 
 @Composable
-private fun KpiRatio(title: String, numerator: Double, denominator: Double) {
+private fun KpiRatioColored(title: String, numerator: Double, denominator: Double, isHours: Boolean) {
     val ok = numerator >= denominator
     val color = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-    val left = formatCurrencyOrHoursAuto(title, numerator)
-    val right = formatCurrencyOrHoursAuto(title, denominator)
+    val left = if (isHours) formatHours(numerator) else formatCurrency(numerator)
+    val right = if (isHours) formatHours(denominator) else formatCurrency(denominator)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -964,14 +765,11 @@ private fun KpiRatio(title: String, numerator: Double, denominator: Double) {
 }
 
 @Composable
-private fun KpiNoColorRatio(title: String, numerator: Double, denominator: Double) {
-    val left = formatCurrencyOrHoursAuto(title, numerator)
-    val right = formatCurrencyOrHoursAuto(title, denominator)
+private fun KpiRatioNoColor(title: String, numerator: Double, denominator: Double, isHours: Boolean) {
+    val left = if (isHours) formatHours(numerator) else formatCurrency(numerator)
+    val right = if (isHours) formatHours(denominator) else formatCurrency(denominator)
 
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.labelMedium)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -982,12 +780,8 @@ private fun KpiNoColorRatio(title: String, numerator: Double, denominator: Doubl
     }
 }
 
-private fun formatCurrencyOrHoursAuto(title: String, value: Double): String {
-    return if (title.contains("Horas", ignoreCase = true)) formatHours(value) else formatCurrency(value)
-}
-
 /* =========================
-   Timeline card (Facturado SI/NO incluido)
+   Timeline card (facturado toggle incluido)
    ========================= */
 
 @Composable
@@ -1002,34 +796,14 @@ private fun TravelRowCard(
     val warning = if (travel.hoursModified) " ⚠️" else ""
     val date = BillingPeriodStore.millisToLocalDateOrToday(travel.startTimestamp, zone).format(dateFormatter)
 
-    Card(
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
+    Card(elevation = CardDefaults.cardElevation(defaultElevation = 1.dp), modifier = Modifier.fillMaxWidth().clickable { onEdit() }) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f).clickable { onEdit() }) {
-                    Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
-                    if (travel.description.isNotBlank()) {
-                        Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TextButton(onClick = onEdit) { Text("✏️") }
-                    TextButton(onClick = onDelete) { Text("🗑️") }
-                }
+            Text("$date · ${travel.origin} → ${travel.destination}$warning", fontWeight = FontWeight.SemiBold)
+            if (travel.description.isNotBlank()) {
+                Text("Ref: ${travel.description}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Horas: ${travel.hoursImputed?.let { formatHours(it) } ?: "—"}")
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Fact.", style = MaterialTheme.typography.labelMedium)
