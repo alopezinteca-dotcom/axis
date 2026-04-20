@@ -207,7 +207,6 @@ fun ActivityHomeScreen(
     var showFromPicker by remember { mutableStateOf(false) }
     var showToPicker by remember { mutableStateOf(false) }
 
-    // ✅ CORRECTO: rememberDatePickerState NO va dentro de remember { }
     val fromPickerState = rememberDatePickerState(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
     )
@@ -215,7 +214,6 @@ fun ActivityHomeScreen(
         initialSelectedDateMillis = BillingPeriodStore.localDateStartMillis(toDate, zone)
     )
 
-    // Mantener sincronizados los DatePickers cuando cambien las fechas
     LaunchedEffect(fromDate) {
         fromPickerState.selectedDateMillis = BillingPeriodStore.localDateStartMillis(fromDate, zone)
     }
@@ -320,7 +318,6 @@ fun ActivityHomeScreen(
         )
     }
 
-    // Dialog añadir festivo (con foco/teclado)
     if (showAddHoliday) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -367,7 +364,6 @@ fun ActivityHomeScreen(
         }
     }
 
-    // Dialog añadir vacaciones (con foco/teclado)
     if (showAddVacation) {
         val focusRequester = remember { FocusRequester() }
         val keyboard = LocalSoftwareKeyboardController.current
@@ -420,10 +416,14 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // PeriodTravels + Timeline helpers
+    // PeriodTravels + Timeline
     // =========================
     val fromMillis = remember(fromDate) { BillingPeriodStore.localDateStartMillis(fromDate, zone) }
     val toMillis = remember(toDate) { BillingPeriodStore.localDateEndMillis(toDate, zone) }
+
+    LaunchedEffect(fromMillis, toMillis) {
+        viewModel.setStopsRange(fromMillis, toMillis)
+    }
 
     val periodTravels by remember(allTravels, fromMillis, toMillis) {
         derivedStateOf { allTravels.filter { it.startTimestamp in fromMillis..toMillis } }
@@ -470,10 +470,7 @@ fun ActivityHomeScreen(
     }
 
     val horasCerradasPeriodo by remember(periodTravels) {
-        derivedStateOf {
-            periodTravels.filter { it.status == TravelStatus.CLOSED }
-                .sumOf { it.hoursImputed ?: 0.0 }
-        }
+        derivedStateOf { periodTravels.filter { it.status == TravelStatus.CLOSED }.sumOf { it.hoursImputed ?: 0.0 } }
     }
 
     val totalEstimadoPeriodo by remember(periodTravels) {
@@ -509,7 +506,7 @@ fun ActivityHomeScreen(
     }
 
     // =========================
-    // UI
+    // UI (Scaffold)
     // =========================
     Scaffold(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
@@ -545,18 +542,11 @@ fun ActivityHomeScreen(
                 Text("Resumen", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
 
                 BlockTitle("Periodo (Desde / Hasta)")
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) {
-                                Text("Desde: ${fromDate.format(dateFormatter)}")
-                            }
-                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) {
-                                Text("Hasta: ${toDate.format(dateFormatter)}")
-                            }
+                            Button(onClick = { showFromPicker = true }, modifier = Modifier.weight(1f)) { Text("Desde: ${fromDate.format(dateFormatter)}") }
+                            Button(onClick = { showToPicker = true }, modifier = Modifier.weight(1f)) { Text("Hasta: ${toDate.format(dateFormatter)}") }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             Button(onClick = { viewModel.resetBillingToThisMonth() }, modifier = Modifier.weight(1f)) { Text("Este mes") }
@@ -590,7 +580,6 @@ fun ActivityHomeScreen(
                     denominator = totalHorasObjetivo,
                     isHours = true
                 )
-                // KPI6 sin color
                 KpiRatioNoColor(
                     title = "6) Estimado pendiente (NO / total estimado periodo)",
                     numerator = pendienteEstimadoPeriodo,
@@ -656,7 +645,7 @@ fun ActivityHomeScreen(
             }
 
             // =========================
-            // DERECHA: Timeline por días
+            // DERECHA: Timeline diario
             // =========================
             Column(
                 modifier = Modifier.weight(0.65f).fillMaxHeight(),
@@ -702,7 +691,6 @@ fun ActivityHomeScreen(
                             }
                         }
 
-                        // Viaje en curso
                         val current = currentTravel
                         val currentDay = current?.startTimestamp?.let { BillingPeriodStore.millisToLocalDateOrToday(it, zone) }
                         if (current != null && current.status == TravelStatus.IN_PROGRESS && currentDay == day) {
