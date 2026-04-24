@@ -134,6 +134,14 @@ class ActivityViewModel(
             initialValue = null
         )
 
+    // ✅ RECUPERADO: Flujo original de datos de exportación
+    val exportData: StateFlow<List<TravelEntity>> =
+        repository.closedTravels.stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList()
+        )
+
     // =========================
     // 2) FLUJOS DE PARADAS
     // =========================
@@ -220,7 +228,7 @@ class ActivityViewModel(
     }
 
     // =========================
-    // 4) VIAJES
+    // 4) GESTIÓN DE VIAJES
     // =========================
 
     fun startTravel(
@@ -269,32 +277,33 @@ class ActivityViewModel(
         viewModelScope.launch { repository.deleteTravel(travelId) }
     }
 
+    // ✅ RECUPERADO: Función original updateKmStart
+    fun updateKmStart(kmStart: Int): Boolean {
+        val current = currentTravel.value ?: return false
+        if (kmStart <= 0) return false
+        viewModelScope.launch { repository.updateKmStart(current.id, kmStart) }
+        return true
+    }
+
     fun closeCurrentTravel(kmEnd: Int, hoursImputed: Double, hoursCalculated: Double): Boolean {
         val defaults = ParamSnapshots(
-            costeKmOperativo = 0.19,
-            costeDietaFija = 12.0,
-            porcBenefExigidoA = 0.35,
-            costeHoraAlejandro = 26.0,
-            costeHoraEmpresaX = 36.65,
-            tarifaObjetivoY = 42.14
+            costeKmOperativo = 0.19, costeDietaFija = 12.0, porcBenefExigidoA = 0.35,
+            costeHoraAlejandro = 26.0, costeHoraEmpresaX = 36.65, tarifaObjetivoY = 42.14
         )
         return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
     }
 
     /**
-     * ✅ FIX: permitir cerrar viajes NO FACTURABLES (billingExpected=0) con 0 horas.
+     * ✅ RECUPERADO: Tus comentarios originales del FIX
+     * FIX: permitir cerrar viajes NO FACTURABLES (billingExpected=0) con 0 horas.
      * - Si billingExpected > 0 => horas deben ser > 0
      * - Si billingExpected == 0 => horas pueden ser 0 (pero nunca negativas)
      */
     fun closeCurrentTravelWithSnapshots(
-        kmEnd: Int,
-        hoursImputed: Double,
-        hoursCalculated: Double,
-        snaps: ParamSnapshots
+        kmEnd: Int, hoursImputed: Double, hoursCalculated: Double, snaps: ParamSnapshots
     ): Boolean {
         val current = currentTravel.value ?: return false
 
-        // KM siempre debe ser coherente
         if (kmEnd < current.kmStart) return false
 
         val nonBillable = current.billingExpected == 0.0
@@ -304,7 +313,7 @@ class ActivityViewModel(
             if (hoursImputed <= 0.0) return false
             if (hoursCalculated <= 0.0) return false
         } else {
-            // ✅ Viaje NO facturable: permitir 0.0, pero no permitir negativos
+            // Viaje NO facturable: permitir 0.0, pero no permitir negativos
             if (hoursImputed < 0.0) return false
             if (hoursCalculated < 0.0) return false
         }
@@ -402,6 +411,11 @@ class ActivityViewModel(
 
     fun clearExportError() { _exportError.value = null }
     fun clearImportError() { _importError.value = null }
+
+    // ✅ RECUPERADO: Compatibilidad con llamadas antiguas
+    fun prepareExport() {
+        // Intencionadamente vacío (compat)
+    }
 
     fun exportMasterAndMaybeBackupToDrive(folderUri: Uri) {
         if (_isExporting.value) return
