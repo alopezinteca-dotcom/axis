@@ -68,7 +68,6 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
-import kotlin.math.abs
 import kotlinx.coroutines.launch
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelEntity
 import vtsen.hashnode.dev.newemptycomposeapp.ui.activity.data.TravelStatus
@@ -101,6 +100,9 @@ fun ActivityHomeScreen(
     val currentTravel by viewModel.currentTravel.collectAsStateWithLifecycle(initialValue = null)
     val stopsInPeriod by viewModel.stopsInPeriod.collectAsStateWithLifecycle(initialValue = emptyList())
 
+    // ✅ (nuevo) si falló el auto-export al cerrar por offline/proveedor, queda pendiente
+    val pendingAutoExport by viewModel.pendingAutoExport.collectAsStateWithLifecycle(initialValue = false)
+
     val periodDates by viewModel.periodDates.collectAsStateWithLifecycle(
         initialValue = LocalDate.now(zone) to LocalDate.now(zone)
     )
@@ -116,7 +118,7 @@ fun ActivityHomeScreen(
 
     LaunchedEffect(exportError) {
         exportError?.let {
-            snackbarHostState.showSnackbar("❌ Export: $it")
+            snackbarHostState.showSnackbar("⚠️ $it")
             viewModel.clearExportError()
         }
     }
@@ -132,27 +134,37 @@ fun ActivityHomeScreen(
         }
     }
 
-    // ---- Maestro por URI (OneDrive/Drive/local genérico) ----
+    // ✅ (nuevo) al entrar en Home, reintenta export pendiente si existía
+    LaunchedEffect(Unit) {
+        viewModel.retryPendingAutoExportIfNeeded()
+    }
+
+    // ---- Maestro por URI (OneDrive/Drive/local) ----
+    // ✅ Cambiado: SELECCIONAR maestro existente (OpenDocument) para que OneDrive aparezca.
     var masterFileUri by remember { mutableStateOf(ExportPreferences.getMasterFileUri(context)) }
 
-    val createMasterLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("text/csv")
+    val selectMasterLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
+
         runCatching {
             context.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         }
+
         ExportPreferences.saveMasterFileUri(context, uri)
         masterFileUri = uri
+
+        // export inmediato recomendado
         viewModel.exportToMasterFileUri(uri)
-        coroutineScope.launch { snackbarHostState.showSnackbar("✅ Maestro creado. Exportando…") }
+        coroutineScope.launch { snackbarHostState.showSnackbar("✅ Maestro seleccionado. Exportando…") }
     }
 
-    fun launchCreateMaster() {
-        createMasterLauncher.launch("AXIS_Master_Database.csv")
+    fun launchSelectMaster() {
+        selectMasterLauncher.launch(arrayOf("text/csv", "text/*", "application/octet-stream"))
     }
 
     // ---- Import CSV ----
@@ -537,6 +549,15 @@ fun ActivityHomeScreen(
                     }
                 }
 
+                if (pendingAutoExport) {
+                    Text(
+                        "⏳ Export pendiente: se reintentará cuando sea posible.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 BlockTitle("Días laborables periodo")
                 KpiSimple("L-V menos festivos y vacaciones", diasLaborablesPeriodo.toString())
 
@@ -567,18 +588,22 @@ fun ActivityHomeScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
+                // ✅ OneDrive: seleccionar archivo existente
                 Button(
-                    onClick = { launchCreateMaster() },
+                    onClick = { launchSelectMaster() },
                     enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
-                ) { Text("☁️ CONFIGURAR DESTINO (CREAR MAESTRO)", fontWeight = FontWeight.Bold) }
+                ) { Text("☁️ SELECCIONAR MAESTRO (ONEDRIVE)", fontWeight = FontWeight.Bold) }
 
                 Button(
                     onClick = {
                         val uri = masterFileUri
                         if (uri == null) {
-                            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ Primero crea/configura el archivo Maestro.") }
-                        } else viewModel.exportToMasterFileUri(uri)
+                            coroutineScope.launch { snackbarHostState.showSnackbar("⚠️ Primero selecciona el Maestro en OneDrive.") }
+                        } else {
+                            if (pendingAutoExport) viewModel.retryPendingAutoExportIfNeeded()
+                            else viewModel.exportToMasterFileUri(uri)
+                        }
                     },
                     enabled = !isExporting && !isImporting,
                     modifier = Modifier.fillMaxWidth().height(56.dp)
@@ -589,7 +614,7 @@ fun ActivityHomeScreen(
                             Text("EXPORTANDO…", fontWeight = FontWeight.Bold)
                         }
                     } else {
-                        Text("📤 EXPORTAR A MAESTRO", fontWeight = FontWeight.Bold)
+                        Text(if (pendingAutoExport) "♻️ REINTENTAR EXPORT PENDIENTE" else "📤 EXPORTAR A MAESTRO", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -687,9 +712,6 @@ fun ActivityHomeScreen(
                                     zone = zone,
                                     dateFormatter = dateFormatter,
                                     onToggleInvoiced = { checked -> viewModel.setFacturado(tr.id, checked) },
-                                    // ✅ CLICK PRINCIPAL:
-                                    // - IN_PROGRESS -> abre detalle (si es el current) / si no, abre edición
-                                    // - CLOSED -> abre edición
                                     onOpen = {
                                         if (tr.status == TravelStatus.IN_PROGRESS) {
                                             if (currentTravel?.id == tr.id) onCurrentTravelClick()
@@ -698,7 +720,6 @@ fun ActivityHomeScreen(
                                             onEditTravelClick(tr.id)
                                         }
                                     },
-                                    // ✅ BOTÓN EDITAR (permite editar también IN_PROGRESS)
                                     onEdit = { onEditTravelClick(tr.id) }
                                 )
                             }
