@@ -45,43 +45,52 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        setContent { AxisTheme { AxisApp() } }
+
+        setContent {
+            AxisTheme {
+                AxisApp()
+            }
+        }
     }
 }
 
 private sealed class Screen {
-    object Menu         : Screen()
+    object Menu : Screen()
     object ActivityHome : Screen()
-    object NewTravel    : Screen()
-    object TravelDetail : Screen()
-    object TravelEdit   : Screen()
-    object Location     : Screen()
-    object Settings     : Screen()
+    object NewTravel : Screen()
+    object TravelDetail : Screen()   // Viaje EN CURSO
+    object TravelEdit : Screen()     // Edición (CERRADO o IN_PROGRESS si se desea)
+    object Location : Screen()
+    object Settings : Screen()
 }
 
 @Composable
 private fun AxisApp() {
     val context = LocalContext.current
 
-    val activityViewModel: ActivityViewModel = viewModel(factory = ActivityViewModelFactory(context))
-    val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModelFactory(context))
+    val activityViewModel: ActivityViewModel = viewModel(
+        factory = ActivityViewModelFactory(context)
+    )
+
+    val settingsViewModel: SettingsViewModel = viewModel(
+        factory = SettingsViewModelFactory(context)
+    )
 
     var currentScreen by remember { mutableStateOf<Screen>(Screen.Menu) }
 
-    // ✅ CORRECCIÓN: BackHandler limpia selectedTravelId cuando el usuario pulsa
-    //    el botón físico de atrás desde TravelEdit, igual que hace el botón "← Volver".
     BackHandler(enabled = currentScreen != Screen.Menu) {
         currentScreen = when (currentScreen) {
+            Screen.TravelDetail -> Screen.ActivityHome
             Screen.TravelEdit -> {
-                activityViewModel.selectTravel(null) // ← limpia selección enganchada
+                // ✅ IMPORTANTÍSIMO: limpiar selección también si vuelves con el botón atrás
+                activityViewModel.selectTravel(null)
                 Screen.ActivityHome
             }
-            Screen.TravelDetail -> Screen.ActivityHome
-            Screen.NewTravel    -> Screen.ActivityHome
+            Screen.NewTravel -> Screen.ActivityHome
             Screen.ActivityHome -> Screen.Menu
-            Screen.Location     -> Screen.Menu
-            Screen.Settings     -> Screen.Menu
-            else                -> Screen.Menu
+            Screen.Location -> Screen.Menu
+            Screen.Settings -> Screen.Menu
+            else -> Screen.Menu
         }
     }
 
@@ -93,37 +102,43 @@ private fun AxisApp() {
         )
 
         Screen.ActivityHome -> ActivityHomeScreen(
-            viewModel            = activityViewModel,
-            onNewTravelClick     = { currentScreen = Screen.NewTravel },
+            viewModel = activityViewModel,
+            onNewTravelClick = { currentScreen = Screen.NewTravel },
             onCurrentTravelClick = { currentScreen = Screen.TravelDetail },
-            onEditTravelClick    = { travelId ->
+            onEditTravelClick = { travelId ->
                 activityViewModel.selectTravel(travelId)
                 currentScreen = Screen.TravelEdit
             }
         )
 
         Screen.NewTravel -> NewTravelScreen(
-            viewModel     = activityViewModel,
+            viewModel = activityViewModel,
             onStartTravel = { currentScreen = Screen.TravelDetail }
         )
 
         Screen.TravelDetail -> TravelDetailScreen(
-            viewModel         = activityViewModel,
+            viewModel = activityViewModel,
             settingsViewModel = settingsViewModel,
-            onCloseTravel     = { currentScreen = Screen.ActivityHome }
+            onCloseTravel = { currentScreen = Screen.ActivityHome }
         )
 
         Screen.TravelEdit -> TravelEditScreen(
-            viewModel         = activityViewModel,
+            viewModel = activityViewModel,
             settingsViewModel = settingsViewModel,
             onDone = {
-                activityViewModel.selectTravel(null) // ← también se limpia desde el botón Volver/Guardar
+                activityViewModel.selectTravel(null)
                 currentScreen = Screen.ActivityHome
             }
         )
 
-        Screen.Location -> LocationComingSoonScreen(onBack = { currentScreen = Screen.Menu })
-        Screen.Settings -> SettingsScreen(viewModel = settingsViewModel, onBack = { currentScreen = Screen.Menu })
+        Screen.Location -> LocationComingSoonScreen(
+            onBack = { currentScreen = Screen.Menu }
+        )
+
+        Screen.Settings -> SettingsScreen(
+            viewModel = settingsViewModel,
+            onBack = { currentScreen = Screen.Menu }
+        )
     }
 }
 
@@ -133,22 +148,41 @@ private fun AxisMenuScreen(
     onLocationClick: () -> Unit,
     onSettingsClick: () -> Unit
 ) {
-    Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background
+    ) {
         Row(
-            modifier = Modifier.fillMaxSize().padding(48.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(48.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
-                modifier = Modifier.weight(0.4f).fillMaxHeight(),
+                modifier = Modifier
+                    .weight(0.4f)
+                    .fillMaxHeight(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.Start
             ) {
-                Text("AXIS", style = MaterialTheme.typography.displayLarge, color = MaterialTheme.colorScheme.primary)
+                Text(
+                    text = "AXIS",
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Suite Profesional", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    text = "Suite Profesional",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+
             Column(
-                modifier = Modifier.weight(0.6f).fillMaxHeight().padding(horizontal = 24.dp),
+                modifier = Modifier
+                    .weight(0.6f)
+                    .fillMaxHeight()
+                    .padding(horizontal = 24.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -163,12 +197,24 @@ private fun AxisMenuScreen(
 }
 
 @Composable
-private fun AxisMenuCard(title: String, subtitle: String, onClick: () -> Unit) {
+private fun AxisMenuCard(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit
+) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(140.dp).clickable { onClick() },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(140.dp)
+            .clickable { onClick() },
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
     ) {
-        Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
             Text(text = title, style = MaterialTheme.typography.headlineLarge)
             Spacer(modifier = Modifier.height(8.dp))
             Text(text = subtitle, style = MaterialTheme.typography.bodyLarge)
@@ -179,12 +225,29 @@ private fun AxisMenuCard(title: String, subtitle: String, onClick: () -> Unit) {
 @Composable
 private fun LocationComingSoonScreen(onBack: () -> Unit) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-        Column(modifier = Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             Text("Location (Módulo 2)", style = MaterialTheme.typography.displaySmall)
-            Text("Próximamente: simulador GPS / ubicaciones.\nEste módulo se implementará después.", style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "Próximamente: simulador GPS / ubicaciones.\nEste módulo se implementará después.",
+                style = MaterialTheme.typography.bodyLarge
+            )
             Spacer(modifier = Modifier.height(8.dp))
-            Card(modifier = Modifier.fillMaxWidth().height(56.dp).clickable { onBack() }) {
-                Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clickable { onBack() }
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
                     Text("VOLVER")
                 }
             }
