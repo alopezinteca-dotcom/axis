@@ -77,7 +77,7 @@ class ActivityViewModel(
         billingPeriod
             .map {
                 val start = BillingPeriodStore.millisToLocalDateOrToday(it.fromMillis, zone)
-                val end = BillingPeriodStore.millisToLocalDateOrToday(it.toMillis, zone)
+                val end   = BillingPeriodStore.millisToLocalDateOrToday(it.toMillis, zone)
                 start to end
             }
             .stateIn(
@@ -110,8 +110,12 @@ class ActivityViewModel(
         }
     }
 
-    fun setStopsRange(fromMillis: Long, toMillis: Long) {
-        setBillingPeriodMillis(fromMillis, toMillis)
+    // ✅ CORRECCIÓN: setStopsRange YA NO escribe en DataStore (era el origen del bucle infinito).
+    // Se mantiene como no-op para no romper cualquier llamada existente, pero NO hace nada.
+    // stopsInPeriod se alimenta directamente de billingPeriod (reactivo desde DataStore).
+    @Deprecated("No necesario. stopsInPeriod ya es reactivo a billingPeriod. No llames este método.")
+    fun setStopsRange(@Suppress("UNUSED_PARAMETER") fromMillis: Long, @Suppress("UNUSED_PARAMETER") toMillis: Long) {
+        // NO-OP intencionado: eliminar el LaunchedEffect que llamaba a esto en ActivityHomeScreen.
     }
 
     // =========================
@@ -139,7 +143,7 @@ class ActivityViewModel(
             initialValue = emptyList()
         )
 
-    // ✅ NUEVO: Estado en el ViewModel para el viaje seleccionado (Detalle/Edición)
+    // ✅ Estado para el viaje seleccionado (Detalle/Edición de viaje cerrado)
     private val _selectedTravelId = MutableStateFlow<String?>(null)
     val selectedTravelId: StateFlow<String?> = _selectedTravelId.asStateFlow()
 
@@ -163,13 +167,15 @@ class ActivityViewModel(
                 initialValue = emptyList()
             )
 
+    // ✅ stopsInPeriod se actualiza reactivamente desde billingPeriod.
+    //    No necesita LaunchedEffect externo ni setStopsRange().
     val stopsInPeriod: StateFlow<List<TravelStopEntity>> =
         billingPeriod
             .map { p -> if (p.fromMillis <= p.toMillis) p else BillingPeriod(p.toMillis, p.fromMillis) }
             .distinctUntilChanged()
             .flatMapLatest { p ->
                 val from = p.fromMillis
-                val to = p.toMillis
+                val to   = p.toMillis
                 if (from <= 0L || to <= 0L) flowOf(emptyList())
                 else stopRepository.stopsInRange(from, to).distinctUntilChanged()
             }
@@ -205,8 +211,8 @@ class ActivityViewModel(
         viewModelScope.launch {
             stopRepository.upsert(
                 TravelStopEntity(
-                    travelId = t.id,
-                    place = place.trim(),
+                    travelId   = t.id,
+                    place      = place.trim(),
                     kmOdometer = kmOdometer
                 )
             )
@@ -250,13 +256,13 @@ class ActivityViewModel(
         viewModelScope.launch {
             repository.insertTravel(
                 TravelEntity(
-                    origin = origin.trim(),
-                    destination = destination.trim(),
-                    description = description.trim(),
-                    kmStart = kmStart,
+                    origin          = origin.trim(),
+                    destination     = destination.trim(),
+                    description     = description.trim(),
+                    kmStart         = kmStart,
                     billingExpected = billingExpected,
-                    hasDiet = hasDiet,
-                    status = TravelStatus.IN_PROGRESS
+                    hasDiet         = hasDiet,
+                    status          = TravelStatus.IN_PROGRESS
                 )
             )
         }
@@ -274,6 +280,7 @@ class ActivityViewModel(
         viewModelScope.launch { repository.setInvoiced(travelId, isInvoiced) }
     }
 
+    /** Actualiza (upsert) cualquier TravelEntity — usado para edición total y cierre con dirección. */
     fun updateTravel(updated: TravelEntity) {
         viewModelScope.launch { repository.insertTravel(updated) }
     }
@@ -291,8 +298,8 @@ class ActivityViewModel(
 
     fun closeCurrentTravel(kmEnd: Int, hoursImputed: Double, hoursCalculated: Double): Boolean {
         val defaults = ParamSnapshots(
-            costeKmOperativo = 0.19, costeDietaFija = 12.0, porcBenefExigidoA = 0.35,
-            costeHoraAlejandro = 26.0, costeHoraEmpresaX = 36.65, tarifaObjetivoY = 42.14
+            costeKmOperativo   = 0.19, costeDietaFija       = 12.0, porcBenefExigidoA = 0.35,
+            costeHoraAlejandro = 26.0, costeHoraEmpresaX    = 36.65, tarifaObjetivoY  = 42.14
         )
         return closeCurrentTravelWithSnapshots(kmEnd, hoursImputed, hoursCalculated, defaults)
     }
@@ -307,33 +314,33 @@ class ActivityViewModel(
         val nonBillable = current.billingExpected == 0.0
 
         if (!nonBillable) {
-            if (hoursImputed <= 0.0) return false
+            if (hoursImputed <= 0.0)   return false
             if (hoursCalculated <= 0.0) return false
         } else {
-            if (hoursImputed < 0.0) return false
+            if (hoursImputed < 0.0)    return false
             if (hoursCalculated < 0.0) return false
         }
 
-        val delta = hoursImputed - hoursCalculated
+        val delta    = hoursImputed - hoursCalculated
         val modified = abs(delta) > 0.01
-        val impact = delta * snaps.costeHoraAlejandro
+        val impact   = delta * snaps.costeHoraAlejandro
 
         viewModelScope.launch {
             repository.closeTravel(
-                id = current.id,
-                kmEnd = kmEnd,
-                endTimestamp = System.currentTimeMillis(),
+                id                     = current.id,
+                kmEnd                  = kmEnd,
+                endTimestamp           = System.currentTimeMillis(),
                 hoursCalculatedSnapshot = hoursCalculated,
-                hoursImputed = hoursImputed,
-                hoursModified = modified,
-                deltaHours = delta,
-                impactEuroAlejandro = impact,
-                snapCosteKmOperativo = snaps.costeKmOperativo,
-                snapCosteDietaFija = snaps.costeDietaFija,
-                snapPorcBenefExigidoA = snaps.porcBenefExigidoA,
+                hoursImputed           = hoursImputed,
+                hoursModified          = modified,
+                deltaHours             = delta,
+                impactEuroAlejandro    = impact,
+                snapCosteKmOperativo   = snaps.costeKmOperativo,
+                snapCosteDietaFija     = snaps.costeDietaFija,
+                snapPorcBenefExigidoA  = snaps.porcBenefExigidoA,
                 snapCosteHoraAlejandro = snaps.costeHoraAlejandro,
-                snapCosteHoraEmpresaX = snaps.costeHoraEmpresaX,
-                snapTarifaObjetivoY = snaps.tarifaObjetivoY
+                snapCosteHoraEmpresaX  = snaps.costeHoraEmpresaX,
+                snapTarifaObjetivoY    = snaps.tarifaObjetivoY
             )
         }
         return true
@@ -347,18 +354,19 @@ class ActivityViewModel(
         val bp = runCatching { BillingPeriodStore.periodFlowRaw(appContext).first() }
             .getOrElse { billingPeriod.value }
 
-        val holidays = CalendarOverridesStore.holidaysFlow(appContext).first()
+        val holidays  = CalendarOverridesStore.holidaysFlow(appContext).first()
         val vacations = CalendarOverridesStore.vacationsFlow(appContext).first()
-        val travels = allTravels.value
-        val stops = stopRepository.allStopsOnce()
+        val travels   = allTravels.value
+        // ✅ Snapshot de TODAS las paradas para el backup (fix del bug de paradas fantasma)
+        val stops     = stopRepository.allStopsOnce()
 
         return BackupSnapshot(
             createdAtMillis = System.currentTimeMillis(),
-            billingPeriod = bp,
-            holidays = holidays,
-            vacations = vacations,
-            travels = travels,
-            stops = stops
+            billingPeriod   = bp,
+            holidays        = holidays,
+            vacations       = vacations,
+            travels         = travels,
+            stops           = stops
         )
     }
 
@@ -378,7 +386,7 @@ class ActivityViewModel(
             CalendarOverridesStore.removeVacationRaw(appContext, CalendarOverridesStore.toRawVacation(v))
         }
 
-        snapshot.holidays.forEach { h -> CalendarOverridesStore.addHoliday(appContext, h.date, h.description) }
+        snapshot.holidays.forEach  { h -> CalendarOverridesStore.addHoliday(appContext, h.date, h.description) }
         snapshot.vacations.forEach { v -> CalendarOverridesStore.addVacation(appContext, v.from, v.to, v.description) }
 
         snapshot.billingPeriod?.let { p ->
@@ -418,13 +426,14 @@ class ActivityViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     val travelsSnapshot = allTravels.value
-                    val stopsSnapshot = stopRepository.allStopsOnce()
+                    // ✅ Incluye paradas reales en el export (fix bug paradas fantasma)
+                    val stopsSnapshot   = stopRepository.allStopsOnce()
 
                     AxisBackupCoordinator.exportMasterAndMaybeBackup(
-                        context = appContext,
-                        folderUri = folderUri,
+                        context    = appContext,
+                        folderUri  = folderUri,
                         allTravels = travelsSnapshot,
-                        allStops = stopsSnapshot
+                        allStops   = stopsSnapshot
                     )
                 }
             } catch (e: Exception) {
@@ -435,6 +444,11 @@ class ActivityViewModel(
         }
     }
 
+    /**
+     * Exporta directamente al URI del archivo maestro seleccionado.
+     * ✅ Usa modo "wt" (write-truncate) para sobrescribir limpiamente.
+     *    Evita la creación de copias "archivo(1).csv" en OneDrive / Drive.
+     */
     fun exportToMasterFileUri(masterFileUri: Uri) {
         if (_isExporting.value) return
         viewModelScope.launch {
@@ -443,9 +457,11 @@ class ActivityViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     val travelsSnapshot = allTravels.value
-                    val stopsSnapshot = stopRepository.allStopsOnce()
+                    // ✅ Snapshot de paradas REALES (fix bug paradas fantasma en CSV)
+                    val stopsSnapshot   = stopRepository.allStopsOnce()
 
                     val resolver = appContext.contentResolver
+                    // ✅ "wt" = write + truncate: sobrescribe el archivo existente en el mismo URI
                     resolver.openOutputStream(masterFileUri, "wt")?.use { os ->
                         AxisUnifiedCsvExporter.writeCsv(os, travelsSnapshot, stopsSnapshot)
                     } ?: throw IllegalStateException("No se pudo abrir OutputStream del maestro")
@@ -469,12 +485,12 @@ class ActivityViewModel(
             _lastImportResult.value = null
             try {
                 val result = AxisImportCoordinator.importFromUnifiedCsvUri(
-                    context = appContext,
-                    csvUri = csvUri,
+                    context          = appContext,
+                    csvUri           = csvUri,
                     travelRepository = repository,
-                    stopRepository = stopRepository,
-                    strategy = strategy,
-                    zone = zone
+                    stopRepository   = stopRepository,
+                    strategy         = strategy,
+                    zone             = zone
                 )
                 _lastImportResult.value = result
             } catch (e: Exception) {
